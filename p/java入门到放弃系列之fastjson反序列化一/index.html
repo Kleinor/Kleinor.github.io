@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+    <head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'><meta name='description' content='源自面试的Java拷打，各位可以早做准备：
+“有没调过Java的漏洞&amp;quot;
+&amp;ldquo;Jdk不同版本如何绕过&amp;rdquo;
+“说说Java在版本迭代过程中漏洞攻击面的变化&amp;quot;
+&amp;ldquo;当你拿到一份java代码，你会如何审计&amp;rdquo;
+“说说各个版本的fastjson漏洞&amp;quot;
+&amp;hellip;&amp;hellip;
+概述 fastjson通过parse、parseObject处理以json结构传入的类的字符串形时，会默认调用该类的共有setter与构造函数，并在合适的触发条件下调用该类的getter方法。当传入的类中setter、getter方法中存在利用点时，攻击者就可以通过传入可控的类的成员变量进行攻击利用。
+fastjson一些要点 JSON.parse(jsonString) 和 JSON.parseObject(jsonString, Target.class)两者调用链一致，前者通过解析 jsonString 字符串获取 @type 指定的类，后者则会直接使用参数中的Target.class。 而JSON.parseObject(jsonString) 将会返回 JSONObject 对象，且类中的所有 getter 与setter 都被调用。区别在于其在最后执行了一次JSON.toJSON。 fastjson 在创建一个类实例时会通过反射调用类中符合条件的 getter/setter 方法，其中 getter 方法需满足条件：方法名长于 4、不是静态方法、以 get 开头且第4位是大写字母、方法不能有参数传入、继承自 Collection|Map|AtomicBoolean|AtomicInteger|AtomicLong、此属性没有 setter 方法；setter 方法需满足条件：方法名长于 4，以 set 开头且第4位是大写字母、非静态方法、返回类型为 void 或当前类、参数个数为 1 个。 如果目标类中私有变量没有 setter 方法，但是在反序列化时仍想给这个变量赋值，则需要使用 Feature.SupportNonPublicField 参数。(TemplatesImpl利用链中无setter方法的私有变量_tfactory以及_name赋值及用到这个知识点) fastjson版本更迭的漏洞利用分析 1.2.24(首个漏洞)&amp;ndash;&amp;gt;1.2.41(黑名单绕过)&amp;ndash;&amp;gt;1.2.42(黑名单绕过)&amp;ndash;&amp;gt;1.2.45(新利用链)&amp;ndash;&amp;gt;1.2.47(AutoType绕过)&amp;ndash;&amp;gt;1.2.68(AutoType绕过)
+1.2.24(首个漏洞) Fastjson通过parseObject/parse将传入的字符串反序列化为Java对象时没有进行合理检查。
+1.2.41(黑名单绕过) 引入了checkAutotype安全机制
+是否是白名单中的类 是否在反序列化cache中(在mappings列表) 类有JSONType注解(如:fastjson.annotation.JSONType) 如果在恶意类前后加上&amp;quot;L&amp;quot;与&amp;quot;;&amp;quot;，例如&amp;quot;LAutoTypeTest.ForTest;&amp;quot;，这样不仅可以轻易的躲避黑名单，随后在程序执行到这里时，还会将首尾附加的&amp;quot;L&amp;quot;与&amp;quot;;&amp;ldquo;剥去。剥皮处理之后字符串变成&amp;quot;AutoTypeTest.ForTest&amp;rdquo;，接着&amp;quot;AutoTypeTest.ForTest&amp;quot;被loadClass加载，恶意类被成功反序列化利用。
+1.2.42(黑名单绕过) 程序并不是直接通过明文的方式来匹配黑白名单，而是采用了一定的加密混淆。通过分析其代码发现第一个if分支用来限制传入的类名长度的，只要传入的poc中类名长度在3与128之间即可绕过。而第二个分支，会去掉首尾&amp;quot;L&amp;quot;与&amp;quot;;&amp;ldquo;再放入原来的黑名单逻辑进行判断，我们进行双写即可绕过。
+总结一下：指定长度，双写绕过。
+1.2.45(新利用链) @type指定了JndiDataSourceFactory类，而在properties属性中的data_source变量中指定恶意数据源。由于JndiDataSourceFactory并不在黑名单上，因此可以顺利通过黑名单校验，在接下来的反序列化过程中，在为Properties变量赋值时调用其setter方法。
+1.2.47(AutoType绕过) 可以在不开启 AutoTypeSupport 的情况下进行反序列化的利用。
+存在一个逻辑问题：autoTypeSupport 为true时，fastjson 也会禁止一些黑名单的类反序列化，但是有一个判断条件：当反序列化的类在黑名单中，且 TypeUtils.'><title>JAVA入门到放弃系列之Fastjson反序列化(一)</title>
+
+<link rel='canonical' href='https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bfastjson%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B8%80/'>
+
+<link rel="stylesheet" href="/scss/style.min.css"><meta property='og:title' content='JAVA入门到放弃系列之Fastjson反序列化(一)'>
+<meta property='og:description' content='源自面试的Java拷打，各位可以早做准备：
+“有没调过Java的漏洞&amp;quot;
+&amp;ldquo;Jdk不同版本如何绕过&amp;rdquo;
+“说说Java在版本迭代过程中漏洞攻击面的变化&amp;quot;
+&amp;ldquo;当你拿到一份java代码，你会如何审计&amp;rdquo;
+“说说各个版本的fastjson漏洞&amp;quot;
+&amp;hellip;&amp;hellip;
+概述 fastjson通过parse、parseObject处理以json结构传入的类的字符串形时，会默认调用该类的共有setter与构造函数，并在合适的触发条件下调用该类的getter方法。当传入的类中setter、getter方法中存在利用点时，攻击者就可以通过传入可控的类的成员变量进行攻击利用。
+fastjson一些要点 JSON.parse(jsonString) 和 JSON.parseObject(jsonString, Target.class)两者调用链一致，前者通过解析 jsonString 字符串获取 @type 指定的类，后者则会直接使用参数中的Target.class。 而JSON.parseObject(jsonString) 将会返回 JSONObject 对象，且类中的所有 getter 与setter 都被调用。区别在于其在最后执行了一次JSON.toJSON。 fastjson 在创建一个类实例时会通过反射调用类中符合条件的 getter/setter 方法，其中 getter 方法需满足条件：方法名长于 4、不是静态方法、以 get 开头且第4位是大写字母、方法不能有参数传入、继承自 Collection|Map|AtomicBoolean|AtomicInteger|AtomicLong、此属性没有 setter 方法；setter 方法需满足条件：方法名长于 4，以 set 开头且第4位是大写字母、非静态方法、返回类型为 void 或当前类、参数个数为 1 个。 如果目标类中私有变量没有 setter 方法，但是在反序列化时仍想给这个变量赋值，则需要使用 Feature.SupportNonPublicField 参数。(TemplatesImpl利用链中无setter方法的私有变量_tfactory以及_name赋值及用到这个知识点) fastjson版本更迭的漏洞利用分析 1.2.24(首个漏洞)&amp;ndash;&amp;gt;1.2.41(黑名单绕过)&amp;ndash;&amp;gt;1.2.42(黑名单绕过)&amp;ndash;&amp;gt;1.2.45(新利用链)&amp;ndash;&amp;gt;1.2.47(AutoType绕过)&amp;ndash;&amp;gt;1.2.68(AutoType绕过)
+1.2.24(首个漏洞) Fastjson通过parseObject/parse将传入的字符串反序列化为Java对象时没有进行合理检查。
+1.2.41(黑名单绕过) 引入了checkAutotype安全机制
+是否是白名单中的类 是否在反序列化cache中(在mappings列表) 类有JSONType注解(如:fastjson.annotation.JSONType) 如果在恶意类前后加上&amp;quot;L&amp;quot;与&amp;quot;;&amp;quot;，例如&amp;quot;LAutoTypeTest.ForTest;&amp;quot;，这样不仅可以轻易的躲避黑名单，随后在程序执行到这里时，还会将首尾附加的&amp;quot;L&amp;quot;与&amp;quot;;&amp;ldquo;剥去。剥皮处理之后字符串变成&amp;quot;AutoTypeTest.ForTest&amp;rdquo;，接着&amp;quot;AutoTypeTest.ForTest&amp;quot;被loadClass加载，恶意类被成功反序列化利用。
+1.2.42(黑名单绕过) 程序并不是直接通过明文的方式来匹配黑白名单，而是采用了一定的加密混淆。通过分析其代码发现第一个if分支用来限制传入的类名长度的，只要传入的poc中类名长度在3与128之间即可绕过。而第二个分支，会去掉首尾&amp;quot;L&amp;quot;与&amp;quot;;&amp;ldquo;再放入原来的黑名单逻辑进行判断，我们进行双写即可绕过。
+总结一下：指定长度，双写绕过。
+1.2.45(新利用链) @type指定了JndiDataSourceFactory类，而在properties属性中的data_source变量中指定恶意数据源。由于JndiDataSourceFactory并不在黑名单上，因此可以顺利通过黑名单校验，在接下来的反序列化过程中，在为Properties变量赋值时调用其setter方法。
+1.2.47(AutoType绕过) 可以在不开启 AutoTypeSupport 的情况下进行反序列化的利用。
+存在一个逻辑问题：autoTypeSupport 为true时，fastjson 也会禁止一些黑名单的类反序列化，但是有一个判断条件：当反序列化的类在黑名单中，且 TypeUtils.'>
+<meta property='og:url' content='https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bfastjson%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B8%80/'>
+<meta property='og:site_name' content='Kleinor'>
+<meta property='og:type' content='article'><meta property='article:section' content='Post' /><meta property='article:tag' content='Java' /><meta property='article:tag' content='Web' /><meta property='article:published_time' content='2023-07-01T00:00:00&#43;00:00'/><meta property='article:modified_time' content='2023-07-01T00:00:00&#43;00:00'/>
+<meta name="twitter:title" content="JAVA入门到放弃系列之Fastjson反序列化(一)">
+<meta name="twitter:description" content="源自面试的Java拷打，各位可以早做准备：
+“有没调过Java的漏洞&amp;quot;
+&amp;ldquo;Jdk不同版本如何绕过&amp;rdquo;
+“说说Java在版本迭代过程中漏洞攻击面的变化&amp;quot;
+&amp;ldquo;当你拿到一份java代码，你会如何审计&amp;rdquo;
+“说说各个版本的fastjson漏洞&amp;quot;
+&amp;hellip;&amp;hellip;
+概述 fastjson通过parse、parseObject处理以json结构传入的类的字符串形时，会默认调用该类的共有setter与构造函数，并在合适的触发条件下调用该类的getter方法。当传入的类中setter、getter方法中存在利用点时，攻击者就可以通过传入可控的类的成员变量进行攻击利用。
+fastjson一些要点 JSON.parse(jsonString) 和 JSON.parseObject(jsonString, Target.class)两者调用链一致，前者通过解析 jsonString 字符串获取 @type 指定的类，后者则会直接使用参数中的Target.class。 而JSON.parseObject(jsonString) 将会返回 JSONObject 对象，且类中的所有 getter 与setter 都被调用。区别在于其在最后执行了一次JSON.toJSON。 fastjson 在创建一个类实例时会通过反射调用类中符合条件的 getter/setter 方法，其中 getter 方法需满足条件：方法名长于 4、不是静态方法、以 get 开头且第4位是大写字母、方法不能有参数传入、继承自 Collection|Map|AtomicBoolean|AtomicInteger|AtomicLong、此属性没有 setter 方法；setter 方法需满足条件：方法名长于 4，以 set 开头且第4位是大写字母、非静态方法、返回类型为 void 或当前类、参数个数为 1 个。 如果目标类中私有变量没有 setter 方法，但是在反序列化时仍想给这个变量赋值，则需要使用 Feature.SupportNonPublicField 参数。(TemplatesImpl利用链中无setter方法的私有变量_tfactory以及_name赋值及用到这个知识点) fastjson版本更迭的漏洞利用分析 1.2.24(首个漏洞)&amp;ndash;&amp;gt;1.2.41(黑名单绕过)&amp;ndash;&amp;gt;1.2.42(黑名单绕过)&amp;ndash;&amp;gt;1.2.45(新利用链)&amp;ndash;&amp;gt;1.2.47(AutoType绕过)&amp;ndash;&amp;gt;1.2.68(AutoType绕过)
+1.2.24(首个漏洞) Fastjson通过parseObject/parse将传入的字符串反序列化为Java对象时没有进行合理检查。
+1.2.41(黑名单绕过) 引入了checkAutotype安全机制
+是否是白名单中的类 是否在反序列化cache中(在mappings列表) 类有JSONType注解(如:fastjson.annotation.JSONType) 如果在恶意类前后加上&amp;quot;L&amp;quot;与&amp;quot;;&amp;quot;，例如&amp;quot;LAutoTypeTest.ForTest;&amp;quot;，这样不仅可以轻易的躲避黑名单，随后在程序执行到这里时，还会将首尾附加的&amp;quot;L&amp;quot;与&amp;quot;;&amp;ldquo;剥去。剥皮处理之后字符串变成&amp;quot;AutoTypeTest.ForTest&amp;rdquo;，接着&amp;quot;AutoTypeTest.ForTest&amp;quot;被loadClass加载，恶意类被成功反序列化利用。
+1.2.42(黑名单绕过) 程序并不是直接通过明文的方式来匹配黑白名单，而是采用了一定的加密混淆。通过分析其代码发现第一个if分支用来限制传入的类名长度的，只要传入的poc中类名长度在3与128之间即可绕过。而第二个分支，会去掉首尾&amp;quot;L&amp;quot;与&amp;quot;;&amp;ldquo;再放入原来的黑名单逻辑进行判断，我们进行双写即可绕过。
+总结一下：指定长度，双写绕过。
+1.2.45(新利用链) @type指定了JndiDataSourceFactory类，而在properties属性中的data_source变量中指定恶意数据源。由于JndiDataSourceFactory并不在黑名单上，因此可以顺利通过黑名单校验，在接下来的反序列化过程中，在为Properties变量赋值时调用其setter方法。
+1.2.47(AutoType绕过) 可以在不开启 AutoTypeSupport 的情况下进行反序列化的利用。
+存在一个逻辑问题：autoTypeSupport 为true时，fastjson 也会禁止一些黑名单的类反序列化，但是有一个判断条件：当反序列化的类在黑名单中，且 TypeUtils.">
+    </head>
+    <body class="
+    article-page has-toc
+">
+    <script>
+        (function() {
+            const colorSchemeKey = 'StackColorScheme';
+            if(!localStorage.getItem(colorSchemeKey)){
+                localStorage.setItem(colorSchemeKey, "auto");
+            }
+        })();
+    </script><script>
+    (function() {
+        const colorSchemeKey = 'StackColorScheme';
+        const colorSchemeItem = localStorage.getItem(colorSchemeKey);
+        const supportDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches === true;
+
+        if (colorSchemeItem == 'dark' || colorSchemeItem === 'auto' && supportDarkMode) {
+            
+
+            document.documentElement.dataset.scheme = 'dark';
+        } else {
+            document.documentElement.dataset.scheme = 'light';
+        }
+    })();
+</script>
+<div class="container main-container flex 
+    
+        extended
+    
+">
+    
+        <div id="article-toolbar">
+            <a href="/" class="back-home">
+                <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-chevron-left" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <polyline points="15 6 9 12 15 18" />
+</svg>
+
+
+
+                <span>返回</span>
+            </a>
+        </div>
+    
+<main class="main full-width">
+    <article class="main-article">
+    <header class="article-header">
+
+    <div class="article-details">
+    
+    <header class="article-category">
+        
+            <a href="/categories/java/" style="background-color: #2a9d8f; color: #fff;">
+                Java
+            </a>
+        
+    </header>
+    
+
+    <h2 class="article-title">
+        <a href="/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bfastjson%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B8%80/">JAVA入门到放弃系列之Fastjson反序列化(一)</a>
+    </h2>
+
+    
+    
+    
+    <footer class="article-time">
+        
+            <div>
+                <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-calendar-time" width="56" height="56" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <path d="M11.795 21h-6.795a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4" />
+  <circle cx="18" cy="18" r="4" />
+  <path d="M15 3v4" />
+  <path d="M7 3v4" />
+  <path d="M3 11h16" />
+  <path d="M18 16.496v1.504l1 1" />
+</svg>
+                <time class="article-time--published">Jul 01, 2023</time>
+            </div>
+        
+
+        
+            <div>
+                <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-clock" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <circle cx="12" cy="12" r="9" />
+  <polyline points="12 7 12 12 15 15" />
+</svg>
+
+
+
+                <time class="article-time--reading">
+                    阅读时长: 1 分钟
+                </time>
+            </div>
+        
+    </footer>
+    
+</div>
+</header>
+
+    <section class="article-content">
+    <p>源自面试的Java拷打，各位可以早做准备：</p>
+<p>“有没调过Java的漏洞&quot;</p>
+<p>&ldquo;Jdk不同版本如何绕过&rdquo;</p>
+<p>“说说Java在版本迭代过程中漏洞攻击面的变化&quot;</p>
+<p>&ldquo;当你拿到一份java代码，你会如何审计&rdquo;</p>
+<p>“说说各个版本的fastjson漏洞&quot;</p>
+<p>&hellip;&hellip;</p>
+<h2 id="概述">概述</h2>
+<p>  fastjson通过parse、parseObject处理以json结构传入的类的字符串形时，会默认调用该类的共有setter与构造函数，并在合适的触发条件下调用该类的getter方法。当传入的类中setter、getter方法中存在利用点时，攻击者就可以通过传入可控的类的成员变量进行攻击利用。</p>
+<h2 id="fastjson一些要点">fastjson一些要点</h2>
+<ul>
+<li><code>JSON.parse(jsonString)</code> 和 <code>JSON.parseObject(jsonString, Target.class)</code>两者调用链一致，前者通过解析 jsonString 字符串获取 <code>@type</code> 指定的类，后者则会直接使用参数中的Target.class。</li>
+<li>而<code>JSON.parseObject(jsonString)</code> 将会返回 JSONObject 对象，且类中的所有 getter 与setter 都被调用。区别在于其在最后执行了一次JSON.toJSON。</li>
+<li>fastjson 在创建一个类实例时会通过反射调用类中符合条件的 getter/setter 方法，其中 getter 方法需满足条件：方法名长于 4、不是静态方法、以 <code>get</code> 开头且第4位是大写字母、方法不能有参数传入、继承自 <code>Collection|Map|AtomicBoolean|AtomicInteger|AtomicLong</code>、此属性没有 setter 方法；setter 方法需满足条件：方法名长于 4，以 <code>set</code> 开头且第4位是大写字母、非静态方法、返回类型为 void 或当前类、参数个数为 1 个。</li>
+<li>如果目标类中私有变量没有 setter 方法，但是在反序列化时仍想给这个变量赋值，则需要使用 <code>Feature.SupportNonPublicField</code> 参数。(TemplatesImpl利用链中无setter方法的私有变量<code>_tfactory</code>以及<code>_name</code>赋值及用到这个知识点)</li>
+</ul>
+<h2 id="fastjson版本更迭的漏洞利用分析">fastjson版本更迭的漏洞利用分析</h2>
+<p>  1.2.24(首个漏洞)&ndash;&gt;1.2.41(黑名单绕过)&ndash;&gt;1.2.42(黑名单绕过)&ndash;&gt;1.2.45(新利用链)&ndash;&gt;1.2.47(AutoType绕过)&ndash;&gt;1.2.68(AutoType绕过)</p>
+<h3 id="1224首个漏洞">1.2.24(首个漏洞)</h3>
+<p>  Fastjson通过parseObject/parse将传入的字符串反序列化为Java对象时没有进行合理检查。</p>
+<h3 id="1241黑名单绕过">1.2.41(黑名单绕过)</h3>
+<p>  引入了checkAutotype安全机制</p>
+<ul>
+<li>是否是白名单中的类</li>
+<li>是否在反序列化cache中(在mappings列表)</li>
+<li>类有JSONType注解(如:fastjson.annotation.JSONType)</li>
+</ul>
+<p>  如果在恶意类前后加上&quot;L&quot;与&quot;;&quot;，例如&quot;LAutoTypeTest.ForTest;&quot;，这样不仅可以轻易的躲避黑名单，随后在程序执行到这里时，还会将首尾附加的&quot;L&quot;与&quot;;&ldquo;剥去。剥皮处理之后字符串变成&quot;AutoTypeTest.ForTest&rdquo;，接着&quot;AutoTypeTest.ForTest&quot;被loadClass加载，恶意类被成功反序列化利用。</p>
+<h3 id="1242黑名单绕过">1.2.42(黑名单绕过)</h3>
+<p>  程序并不是直接通过明文的方式来匹配黑白名单，而是采用了一定的加密混淆。通过分析其代码发现第一个if分支用来限制传入的类名长度的，只要传入的poc中类名长度在3与128之间即可绕过。而第二个分支，会去掉首尾&quot;L&quot;与&quot;;&ldquo;再放入原来的黑名单逻辑进行判断，我们进行双写即可绕过。</p>
+<p>  总结一下：指定长度，双写绕过。</p>
+<h3 id="1245新利用链">1.2.45(新利用链)</h3>
+<p>  @type指定了JndiDataSourceFactory类，而在properties属性中的data_source变量中指定恶意数据源。由于<code>JndiDataSourceFactory</code>并不在黑名单上，因此可以顺利通过黑名单校验，在接下来的反序列化过程中，在为Properties变量赋值时调用其setter方法。</p>
+<h3 id="1247autotype绕过">1.2.47(AutoType绕过)</h3>
+<p>  可以在不开启 AutoTypeSupport 的情况下进行反序列化的利用。</p>
+<p>  存在一个逻辑问题：<code>autoTypeSupport </code>为<code>true</code>时，fastjson 也会禁止一些黑名单的类反序列化，但是有一个判断条件：当反序列化的类在黑名单中，且 <code>TypeUtils.mappings</code> 中没有该类的缓存时，才会抛出异常。此时我们可以通过将恶意的 val 加载到 mappings 中，再次以恶意类进行 <code>@type</code> 请求时即可绕过黑名单进行的阻拦。</p>
+<h3 id="1268autotype绕过">1.2.68(AutoType绕过)</h3>
+<p>  版本 1.2.68 本身更新了一个新的安全控制点 safeMode，如果应用程序开启了 safeMode，将在 <code>checkAutoType()</code> 中直接抛出异常，也就是完全禁止 autoType。不过在 <code>checkAutoType()</code> 函数中有这样的逻辑：如果函数有 <code>expectClass</code> 入参，且我们传入的类名是 <code>expectClass</code> 的子类或实现，并且不在黑名单中，就可以通过 <code>checkAutoType()</code> 的安全检测。</p>
+<p>  本章简单地归纳对各个版本的fastjson漏洞原理，应付一下面试，之后会进一步对其复现和代码调试分析。</p>
+<h2 id="参考资料">参考资料</h2>
+<p>[1]https://www.javasec.org/java-vuls/FastJson.html</p>
+<p>[2]https://paper.seebug.org/1274/</p>
+<p>[3]https://paper.seebug.org/1319/</p>
+<p>[4]https://paper.seebug.org/1343/</p>
+
+</section>
+
+
+    <footer class="article-footer">
+    
+    <section class="article-tags">
+        
+            <a href="/tags/java/">Java</a>
+        
+            <a href="/tags/web/">Web</a>
+        
+    </section>
+
+
+    
+    <section class="article-copyright">
+        <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-copyright" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <circle cx="12" cy="12" r="9" />
+  <path d="M14.5 9a3.5 4 0 1 0 0 6" />
+</svg>
+
+
+
+        <span>Licensed under CC BY-NC-SA 4.0</span>
+    </section>
+    </footer>
+
+
+    
+</article>
+
+    <aside class="related-contents--wrapper">
+    
+    
+        <h2 class="section-title">相关文章</h2>
+        <div class="related-contents">
+            <div class="flex article-list--tile">
+                
+                    
+<article class="">
+    <a href="/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bjackson%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B8%80/">
+        
+        
+
+        <div class="article-details">
+            <h2 class="article-title">JAVA入门到放弃系列之Jackson反序列化(一)</h2>
+        </div>
+    </a>
+</article>
+                
+                    
+<article class="">
+    <a href="/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bjdbc%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96/">
+        
+        
+
+        <div class="article-details">
+            <h2 class="article-title">JAVA入门到放弃系列之JDBC反序列化</h2>
+        </div>
+    </a>
+</article>
+                
+                    
+<article class="">
+    <a href="/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Btemplatesimpl%E6%B3%A8%E5%85%A5fastjson%E5%86%85%E5%AD%98%E9%A9%AC/">
+        
+        
+
+        <div class="article-details">
+            <h2 class="article-title">JAVA入门到放弃系列之TemplatesImpl注入Fastjson内存马</h2>
+        </div>
+    </a>
+</article>
+                
+            </div>
+        </div>
+    
+</aside>
+
+     
+    
+        
+    
+
+    <footer class="site-footer">
+    <section class="copyright">
+        &copy; 
+        
+            2021 - 
+        
+        2023 Kleinor
+    </section>
+    
+    <section class="powerby">
+         <br />
+        
+    </section>
+</footer>
+
+
+    
+<div class="pswp" tabindex="-1" role="dialog" aria-hidden="true">
+
+    
+    <div class="pswp__bg"></div>
+
+    
+    <div class="pswp__scroll-wrap">
+
+        
+        <div class="pswp__container">
+            <div class="pswp__item"></div>
+            <div class="pswp__item"></div>
+            <div class="pswp__item"></div>
+        </div>
+
+        
+        <div class="pswp__ui pswp__ui--hidden">
+
+            <div class="pswp__top-bar">
+
+                
+
+                <div class="pswp__counter"></div>
+
+                <button class="pswp__button pswp__button--close" title="Close (Esc)"></button>
+
+                <button class="pswp__button pswp__button--share" title="Share"></button>
+
+                <button class="pswp__button pswp__button--fs" title="Toggle fullscreen"></button>
+
+                <button class="pswp__button pswp__button--zoom" title="Zoom in/out"></button>
+
+                
+                
+                <div class="pswp__preloader">
+                    <div class="pswp__preloader__icn">
+                        <div class="pswp__preloader__cut">
+                            <div class="pswp__preloader__donut"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pswp__share-modal pswp__share-modal--hidden pswp__single-tap">
+                <div class="pswp__share-tooltip"></div>
+            </div>
+
+            <button class="pswp__button pswp__button--arrow--left" title="Previous (arrow left)">
+            </button>
+
+            <button class="pswp__button pswp__button--arrow--right" title="Next (arrow right)">
+            </button>
+
+            <div class="pswp__caption">
+                <div class="pswp__caption__center"></div>
+            </div>
+
+        </div>
+
+    </div>
+
+</div><script 
+                src="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.min.js"integrity="sha256-ePwmChbbvXbsO02lbM3HoHbSHTHFAeChekF1xKJdleo="crossorigin="anonymous"
+                defer="true"
+                >
+            </script><script 
+                src="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe-ui-default.min.js"integrity="sha256-UKkzOn/w1mBxRmLLGrSeyB4e1xbrp4xylgAWb3M42pU="crossorigin="anonymous"
+                defer="true"
+                >
+            </script><link 
+                rel="stylesheet" 
+                href="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/default-skin/default-skin.css"integrity="sha256-c0uckgykQ9v5k&#43;IqViZOZKc47Jn7KQil4/MP3ySA3F8="crossorigin="anonymous"
+            ><link 
+                rel="stylesheet" 
+                href="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.css"integrity="sha256-SBLU4vv6CA6lHsZ1XyTdhyjJxCjPif/TRkjnsyGAGnE="crossorigin="anonymous"
+            >
+
+            </main>
+    
+        <aside class="sidebar right-sidebar sticky">
+            <section class="widget archives">
+                <div class="widget-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-hash" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <line x1="5" y1="9" x2="19" y2="9" />
+  <line x1="5" y1="15" x2="19" y2="15" />
+  <line x1="11" y1="4" x2="7" y2="20" />
+  <line x1="17" y1="4" x2="13" y2="20" />
+</svg>
+
+
+
+                </div>
+                <h2 class="widget-title section-title">目录</h2>
+                
+                <div class="widget--toc">
+                    <nav id="TableOfContents">
+  <ol>
+    <li><a href="#概述">概述</a></li>
+    <li><a href="#fastjson一些要点">fastjson一些要点</a></li>
+    <li><a href="#fastjson版本更迭的漏洞利用分析">fastjson版本更迭的漏洞利用分析</a>
+      <ol>
+        <li><a href="#1224首个漏洞">1.2.24(首个漏洞)</a></li>
+        <li><a href="#1241黑名单绕过">1.2.41(黑名单绕过)</a></li>
+        <li><a href="#1242黑名单绕过">1.2.42(黑名单绕过)</a></li>
+        <li><a href="#1245新利用链">1.2.45(新利用链)</a></li>
+        <li><a href="#1247autotype绕过">1.2.47(AutoType绕过)</a></li>
+        <li><a href="#1268autotype绕过">1.2.68(AutoType绕过)</a></li>
+      </ol>
+    </li>
+    <li><a href="#参考资料">参考资料</a></li>
+  </ol>
+</nav>
+                </div>
+            </section>
+        </aside>
+    
+
+        </div>
+        <script 
+                src="https://cdn.jsdelivr.net/npm/node-vibrant@3.1.5/dist/vibrant.min.js"integrity="sha256-5NovOZc4iwiAWTYIFiIM7DxKUXKWvpVEuMEPLzcm5/g="crossorigin="anonymous"
+                defer="false"
+                >
+            </script><script type="text/javascript" src="/ts/main.js" defer></script>
+<script>
+    (function () {
+        const customFont = document.createElement('link');
+        customFont.href = "https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap";
+
+        customFont.type = "text/css";
+        customFont.rel = "stylesheet";
+    
+        document.head.appendChild(customFont);
+    }());
+
+</script>
+
+<a href="#" id="back-to-top" title="返回顶部"></a>
+
+
+<style>
+  #back-to-top {
+    display: none;
+    position: fixed;
+    bottom: 20px;
+    right: 55px;
+    width: 55px;
+    height: 55px;
+    border-radius: 7px;
+    background-color: rgb(246, 241, 241);
+    box-shadow: var(--shadow-l2);
+    font-size: 30px;
+    text-align: center;
+    line-height: 50px;
+    cursor: pointer;
+  }
+
+  #back-to-top:before {
+    content: ' ';
+    display: inline-block;
+    position: relative;
+    top: 0;
+    transform: rotate(135deg);
+    height: 10px;
+    width: 10px;
+    border-width: 0 0 2px 2px;
+    border-color: var(--back-to-top-color);
+    border-style: solid;
+  }
+
+  #back-to-top:hover:before {
+    border-color: #2674e0;
+  }
+
+   
+  @media screen and (max-width: 768px) {
+    #back-to-top {
+      bottom: 20px;
+      right: 20px;
+      width: 40px;
+      height: 40px;
+      font-size: 10px;
+    }
+  }
+
+   
+  @media screen and (min-width: 1024px) {
+    #back-to-top {
+      bottom: 20px;
+      right: 40px;
+    }
+  }
+
+   
+  @media screen and (min-width: 1280px) {
+    #back-to-top {
+      bottom: 20px;
+      right: 55px;
+    }
+  }
+
+   
+  @media screen and (min-width: 1536px) {
+    #back-to-top {
+      visibility: hidden;
+    }
+  }
+</style>
+
+
+<script>
+  function backToTop() {
+    document.documentElement.scrollIntoView({
+      behavior: 'smooth',
+    })
+  }
+
+  window.onload = function () {
+    let scrollTop =
+      this.document.documentElement.scrollTop || this.document.body.scrollTop
+    let totopBtn = this.document.getElementById('back-to-top')
+    if (scrollTop > 0) {
+      totopBtn.style.display = 'inline'
+    } else {
+      totopBtn.style.display = 'none'
+    }
+  }
+
+  window.onscroll = function () {
+    let scrollTop =
+      this.document.documentElement.scrollTop || this.document.body.scrollTop
+    let totopBtn = this.document.getElementById('back-to-top')
+    if (scrollTop < 200) {
+      totopBtn.style.display = 'none'
+    } else {
+      totopBtn.style.display = 'inline'
+      totopBtn.addEventListener('click', backToTop, false)
+    }
+  }
+</script>
+    </body>
+</html>

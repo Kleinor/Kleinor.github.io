@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Posts on Kleinor</title>
+    <link>https://Kleinor.github.io/post/</link>
+    <description>Recent content in Posts on Kleinor</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>zh-cn</language>
+    <lastBuildDate>Sun, 06 Aug 2023 00:00:00 +0000</lastBuildDate><atom:link href="https://Kleinor.github.io/post/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>JAVA入门到放弃系列之Jackson反序列化(一)</title>
+      <link>https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bjackson%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B8%80/</link>
+      <pubDate>Sun, 06 Aug 2023 00:00:00 +0000</pubDate>
+      
+      <guid>https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bjackson%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B8%80/</guid>
+      <description>前言 之前在JAVA入门到放弃系列之TemplatesImpl注入Fastjson内存马中提到无论是Impl链或是二次反序列化的SignedObject都需要借助fastjson的JSONArray/JSONObject来触发getter方法。
+所以同样的，当fastjson库被替换成jackson库，我们依旧可以找到相似的类来触发getter方法，它就是PojoNode，其触发条件如下:
+不需要存在该属性 getter方法需要有返回值 尽可能的只有一个getter 我们可以通过一道CTF题来学习这个知识点。
+2023巅峰极客-babyurl /hack路由是入口点,通过传入的payload进行反序列化，/file路由可以读取/tmp/file内容
+@GetMapping({&amp;#34;/hack&amp;#34;}) @ResponseBody public String hack(@RequestParam String payload) { byte[] bytes = Base64.getDecoder().decode(payload.getBytes(StandardCharsets.UTF_8)); ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(bytes); try { ObjectInputStream ois = new MyObjectInputStream(byteArrayInputStream); URLHelper o = (URLHelper)ois.readObject(); System.out.println(o); System.out.println(o.url); return &amp;#34;ok!&amp;#34;; } catch (Exception var6) { var6.printStackTrace(); return var6.toString(); } } @RequestMapping({&amp;#34;/file&amp;#34;}) @ResponseBody public String file() throws IOException { File file = new File(&amp;#34;/tmp/file&amp;#34;); if (!file.exists()) { file.createNewFile(); } FileInputStream fis = new FileInputStream(file); byte[] bytes = new byte[1024]; fis.</description>
+    </item>
+    
+    <item>
+      <title>JAVA入门到放弃系列之JDBC反序列化</title>
+      <link>https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bjdbc%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96/</link>
+      <pubDate>Mon, 17 Jul 2023 00:00:00 +0000</pubDate>
+      
+      <guid>https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bjdbc%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96/</guid>
+      <description>JDBC简介 ​JDBC（Java Database Connectivity）是Java中用来连接和执行查询到数据库的标准API。JDBC提供了一种基础的服务，允许开发者使用SQL语句来查询和更新数据库中的数据。JDBC是跨数据库可移植的，意味着你可以无缝地切换数据库，只需要改变连接字符串和驱动即可。
+MySQL JDBC 漏洞成因 Mysql JDBC 中包含一个危险的扩展参数： &amp;ldquo;autoDeserialize&amp;rdquo;。这个参数配置为 true 时，JDBC 客户端将会自动反序列化服务端返回的数据。
+当JDBC连接到数据库时，驱动会自动执行SHOW SESSION STATUS和SHOW COLLATION查询，并对查询结果进行反序列化处理,如果我们可以控制jdbc客户端的url连接，去连接我们自己的一个恶意mysql服务(这个恶意服务只需要能回复jdbc发来的数据包即可)，当jdbc驱动自动执行一些查询(如show session status或show collation)这个服务会给jdbc发送序列化后的payload，然后jdbc本地进行反序列化处理后触发RCE
+JDBC连接参数
+StatementInterceptors:连接参数是用于指定实现 com.mysql.jdbc.StatementInterceptor 接口的类的逗号分隔列表的参数。这些拦截器可用于通过在查询执行和结果返回之间插入自定义逻辑来影响查询执行的结果，这些拦截器将被添加到一个链中，第一个拦截器返回的结果将被传递到第二个拦截器，以此类推。自 8.0.7起被queryInterceptors参数替代。
+queryInterceptors:一个逗号分割的Class列表（实现了com.mysql.cj.interceptors.QueryInterceptor接口的Class），在Query&amp;quot;之间&amp;quot;进行执行来影响结果。（效果上来看是在Query执行前后各插入一次操作）
+autoDeserialize:自动检测与反序列化存在BLOB字段中的对象。
+detectCustomCollations:驱动程序是否应该检测服务器上安装的自定义字符集/排序规则，如果此选项设置为“true”，驱动程序会在每次建立连接时从服务器获取实际的字符集/排序规则。这可能会显着减慢连接初始化速度。
+其他详细参数可在官方文档中查询：
+https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-reference-configuration-properties.html
+[羊城杯 2020]A Piece Of Java 用的BUU上的环境，先看入口，通过Cookie读取data，反序列化后返回实例化对象info,且该类最后会执行getAllinfo方法,其中userInfo类没有什么可利用的
+@GetMapping({&amp;#34;/hello&amp;#34;}) public String hello(@CookieValue(value = &amp;#34;data&amp;#34;,required = false) String cookieData, Model model) { if (cookieData != null &amp;amp;&amp;amp; !cookieData.equals(&amp;#34;&amp;#34;)) { Info info = (Info)this.deserialize(cookieData); if (info != null) { model.addAttribute(&amp;#34;info&amp;#34;, info.getAllInfo()); } return &amp;#34;hello&amp;#34;; } else { return &amp;#34;redirect:/index&amp;#34;; } } 先看下this.</description>
+    </item>
+    
+    <item>
+      <title>JAVA入门到放弃系列之TemplatesImpl注入Fastjson内存马</title>
+      <link>https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Btemplatesimpl%E6%B3%A8%E5%85%A5fastjson%E5%86%85%E5%AD%98%E9%A9%AC/</link>
+      <pubDate>Sun, 09 Jul 2023 00:00:00 +0000</pubDate>
+      
+      <guid>https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Btemplatesimpl%E6%B3%A8%E5%85%A5fastjson%E5%86%85%E5%AD%98%E9%A9%AC/</guid>
+      <description>概要 记录一下两道题的踩坑过程，取自2023AliyunCTF ezbean以及2023CIVC信息安全攻防赛Easy expr
+题目附件：
+https://pan.baidu.com/s/1krJGB1zxcF7m6WDZDZji1Q 提取码: cuqt
+涉及知识点：
+TemplatesImpl、FastJson原生反序列化、二次反序列化、Springboot Interceptor内存马
+前置知识 TemplatesImpl利用链 即com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl，可以用于加载恶意字节码；
+触发条件:
+​	1._bytecodes 不为空;
+​	2.类的父类为com.sun.org.apache.xalan.internal.xsltc.runtime.AbstractTranslet;
+​	3.name 不为 null;
+​	4._tfactory 不为 null;
+​	5.需要执行的恶意代码写在_bytecodes 变量对应的类的静态方法或构造方法中;
+​	6._tfactory需要是一个拥有getExternalExtensionsMap()方法的类，使用jdk自带的TransformerFactoryImpl类。
+//Gadget TemplatesImpl#getOutputProperties() -&amp;gt; TemplatesImpl#newTransformer() -&amp;gt; TemplatesImpl#getTransletInstance() -&amp;gt; TemplatesImpl#defineTransletClasses() -&amp;gt; TransletClassLoader#defineClass() BadAttributeValueExpException(jdk1.8引入) 即javax.management.BadAttributeValueExpException 继承自 java.lang.Exception，java.lang.Exception 继承自 java.lang.Throwable，而 java.lang.Throwable 实现了 java.io.Serializable。
+因此BadAttributeValueExpException 符合了可序列化这个要求，它的readObject 方法，可以主动触发val字段的toString方法。
+JSONArray/JSONObject 在fastjson包中我们可以找到JSONArray与JSONObject继承了Serializable接口（高版本还有AntiCollisionHashMap），JSONArray在其父类Json类当中的toString方法能触发toJsonString的调用;
+且从1.2.49开始，JSONArray以及JSONObject方法有了自己的readObject方法，在其SecureObjectInputStream类当中重写了resolveClass,通过调用了checkAutoType方法做类的检查。然而当不安全的ObjectInputStream套个安全的SecureObjectInputStream将会导致绕过，若在JSONArray/JSONObject对象反序列化恢复对象时，让我们的恶意类成为引用类型即可绕过resolveClass的检查，因此我们可以通过List，Set与Map类型触发引用进行绕过。
+以HashMap为代表的能够存储key-value键值对且可序列化的类，在key-value为相同的恶意对象将会创建一个引用类型。
+1.HashMap2.ConcurrentHashMap3.LinkedHashMap4.IdentityHashMap ezbean 便于Easy expr进行对比，这里我只复现一下其非预期解，即利用fastjson原生反序列化。
+题目依赖springboot 和 fastjson1.2.60
+&amp;lt;dependency&amp;gt; &amp;lt;groupId&amp;gt;com.</description>
+    </item>
+    
+    <item>
+      <title>JAVA入门到放弃系列之Fastjson反序列化(一)</title>
+      <link>https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bfastjson%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B8%80/</link>
+      <pubDate>Sat, 01 Jul 2023 00:00:00 +0000</pubDate>
+      
+      <guid>https://Kleinor.github.io/p/java%E5%85%A5%E9%97%A8%E5%88%B0%E6%94%BE%E5%BC%83%E7%B3%BB%E5%88%97%E4%B9%8Bfastjson%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E4%B8%80/</guid>
+      <description>源自面试的Java拷打，各位可以早做准备：
+“有没调过Java的漏洞&amp;quot;
+&amp;ldquo;Jdk不同版本如何绕过&amp;rdquo;
+“说说Java在版本迭代过程中漏洞攻击面的变化&amp;quot;
+&amp;ldquo;当你拿到一份java代码，你会如何审计&amp;rdquo;
+“说说各个版本的fastjson漏洞&amp;quot;
+&amp;hellip;&amp;hellip;
+概述 fastjson通过parse、parseObject处理以json结构传入的类的字符串形时，会默认调用该类的共有setter与构造函数，并在合适的触发条件下调用该类的getter方法。当传入的类中setter、getter方法中存在利用点时，攻击者就可以通过传入可控的类的成员变量进行攻击利用。
+fastjson一些要点 JSON.parse(jsonString) 和 JSON.parseObject(jsonString, Target.class)两者调用链一致，前者通过解析 jsonString 字符串获取 @type 指定的类，后者则会直接使用参数中的Target.class。 而JSON.parseObject(jsonString) 将会返回 JSONObject 对象，且类中的所有 getter 与setter 都被调用。区别在于其在最后执行了一次JSON.toJSON。 fastjson 在创建一个类实例时会通过反射调用类中符合条件的 getter/setter 方法，其中 getter 方法需满足条件：方法名长于 4、不是静态方法、以 get 开头且第4位是大写字母、方法不能有参数传入、继承自 Collection|Map|AtomicBoolean|AtomicInteger|AtomicLong、此属性没有 setter 方法；setter 方法需满足条件：方法名长于 4，以 set 开头且第4位是大写字母、非静态方法、返回类型为 void 或当前类、参数个数为 1 个。 如果目标类中私有变量没有 setter 方法，但是在反序列化时仍想给这个变量赋值，则需要使用 Feature.SupportNonPublicField 参数。(TemplatesImpl利用链中无setter方法的私有变量_tfactory以及_name赋值及用到这个知识点) fastjson版本更迭的漏洞利用分析 1.2.24(首个漏洞)&amp;ndash;&amp;gt;1.2.41(黑名单绕过)&amp;ndash;&amp;gt;1.2.42(黑名单绕过)&amp;ndash;&amp;gt;1.2.45(新利用链)&amp;ndash;&amp;gt;1.2.47(AutoType绕过)&amp;ndash;&amp;gt;1.2.68(AutoType绕过)
+1.2.24(首个漏洞) Fastjson通过parseObject/parse将传入的字符串反序列化为Java对象时没有进行合理检查。
+1.2.41(黑名单绕过) 引入了checkAutotype安全机制
+是否是白名单中的类 是否在反序列化cache中(在mappings列表) 类有JSONType注解(如:fastjson.annotation.JSONType) 如果在恶意类前后加上&amp;quot;L&amp;quot;与&amp;quot;;&amp;quot;，例如&amp;quot;LAutoTypeTest.ForTest;&amp;quot;，这样不仅可以轻易的躲避黑名单，随后在程序执行到这里时，还会将首尾附加的&amp;quot;L&amp;quot;与&amp;quot;;&amp;ldquo;剥去。剥皮处理之后字符串变成&amp;quot;AutoTypeTest.ForTest&amp;rdquo;，接着&amp;quot;AutoTypeTest.ForTest&amp;quot;被loadClass加载，恶意类被成功反序列化利用。
+1.2.42(黑名单绕过) 程序并不是直接通过明文的方式来匹配黑白名单，而是采用了一定的加密混淆。通过分析其代码发现第一个if分支用来限制传入的类名长度的，只要传入的poc中类名长度在3与128之间即可绕过。而第二个分支，会去掉首尾&amp;quot;L&amp;quot;与&amp;quot;;&amp;ldquo;再放入原来的黑名单逻辑进行判断，我们进行双写即可绕过。
+总结一下：指定长度，双写绕过。
+1.2.45(新利用链) @type指定了JndiDataSourceFactory类，而在properties属性中的data_source变量中指定恶意数据源。由于JndiDataSourceFactory并不在黑名单上，因此可以顺利通过黑名单校验，在接下来的反序列化过程中，在为Properties变量赋值时调用其setter方法。
+1.2.47(AutoType绕过) 可以在不开启 AutoTypeSupport 的情况下进行反序列化的利用。
+存在一个逻辑问题：autoTypeSupport 为true时，fastjson 也会禁止一些黑名单的类反序列化，但是有一个判断条件：当反序列化的类在黑名单中，且 TypeUtils.</description>
+    </item>
+    
+    <item>
+      <title>2021年鹤城杯部分Web wp</title>
+      <link>https://Kleinor.github.io/p/2021%E5%B9%B4%E9%B9%A4%E5%9F%8E%E6%9D%AF%E9%83%A8%E5%88%86web-wp/</link>
+      <pubDate>Thu, 11 Mar 2021 00:00:00 +0000</pubDate>
+      
+      <guid>https://Kleinor.github.io/p/2021%E5%B9%B4%E9%B9%A4%E5%9F%8E%E6%9D%AF%E9%83%A8%E5%88%86web-wp/</guid>
+      <description>MIDDLE_MAGIC 考察点：
+php tricks:%0a换行绕过正则，sha1()数组绕过， json绕过;
+&amp;lt;?php highlight_file(__FILE__); include &amp;#34;./flag.php&amp;#34;; include &amp;#34;./result.php&amp;#34;; if(isset($_GET[&amp;#39;aaa&amp;#39;]) &amp;amp;&amp;amp; strlen($_GET[&amp;#39;aaa&amp;#39;]) &amp;lt; 20){ $aaa = preg_replace(&amp;#39;/^(.*)level(.*)$/&amp;#39;, &amp;#39;${1}&amp;lt;!-- filtered --&amp;gt;${2}&amp;#39;, $_GET[&amp;#39;aaa&amp;#39;]); if(preg_match(&amp;#39;/pass_the_level_1#/&amp;#39;, $aaa)){ echo &amp;#34;here is level 2&amp;#34;; if (isset($_POST[&amp;#39;admin&amp;#39;]) and isset($_POST[&amp;#39;root_pwd&amp;#39;])) { if ($_POST[&amp;#39;admin&amp;#39;] == $_POST[&amp;#39;root_pwd&amp;#39;]) echo &amp;#39;&amp;lt;p&amp;gt;The level 2 can not pass!&amp;lt;/p&amp;gt;&amp;#39;; // START FORM PROCESSING else if (sha1($_POST[&amp;#39;admin&amp;#39;]) === sha1($_POST[&amp;#39;root_pwd&amp;#39;])){ echo &amp;#34;here is level 3,do you kown how to overcome it?&amp;#34;; if (isset($_POST[&amp;#39;level_3&amp;#39;])) { $level_3 = json_decode($_POST[&amp;#39;level_3&amp;#39;]); if ($level_3-&amp;gt;result == $result) { echo &amp;#34;success:&amp;#34;.</description>
+    </item>
+    
+  </channel>
+</rss>
